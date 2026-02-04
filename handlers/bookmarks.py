@@ -1,11 +1,28 @@
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.enums import ChatMemberStatus
 from database import db
 from keyboards import get_bookmarks_menu, get_back_button
 
 router = Router()
+
+# 🔑 Константа канала (должна совпадать с .env)
+REQUIRED_CHANNEL = "@bot_pro_bot_you"
+
+# 🔑 Функция проверки подписки
+async def is_subscribed(bot: Bot, user_id: int) -> bool:
+    """Проверить, подписан ли пользователь на канал"""
+    try:
+        chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
+        return chat_member.status in [
+            ChatMemberStatus.MEMBER,
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.CREATOR
+        ]
+    except Exception as e:
+        return False
 
 # FSM для добавления закладки
 class BookmarkStates(StatesGroup):
@@ -13,22 +30,39 @@ class BookmarkStates(StatesGroup):
     waiting_for_tags = State()
 
 @router.callback_query(F.data == "bookmarks_menu")
-async def bookmarks_menu(callback: CallbackQuery):
-    await callback.message.edit_text(
-        "📌 <b>Закладки</b>\n\n"
-        "Сохраняйте важные сообщения, ссылки, фото — всё в одном месте.\n\n"
-        "Выберите действие:",
-        reply_markup=get_bookmarks_menu()
-    )
+async def bookmarks_menu(callback: CallbackQuery, bot: Bot):
+    # 🔑 Проверка подписки
+    if not await is_subscribed(bot, callback.from_user.id):
+        await callback.answer("🔒 Для доступа к функциям бота подпишитесь на канал @bot_pro_bot_you", show_alert=True)
+        return
+    
+    try:
+        await callback.message.edit_text(
+            "📌 <b>Закладки</b>\n\n"
+            "Сохраняйте важные сообщения, ссылки, фото — всё в одном месте.\n\n"
+            "Выберите действие:",
+            reply_markup=get_bookmarks_menu()
+        )
+    except Exception:
+        await callback.message.answer(
+            "📌 <b>Закладки</b>\n\n"
+            "Сохраняйте важные сообщения, ссылки, фото — всё в одном месте.\n\n"
+            "Выберите действие:",
+            reply_markup=get_bookmarks_menu()
+        )
     await callback.answer()
 
 @router.callback_query(F.data == "bookmarks_list")
-async def show_bookmarks(callback: CallbackQuery):
+async def show_bookmarks(callback: CallbackQuery, bot: Bot):
+    # 🔑 Проверка подписки
+    if not await is_subscribed(bot, callback.from_user.id):
+        await callback.answer("🔒 Для доступа к функциям бота подпишитесь на канал @bot_pro_bot_you", show_alert=True)
+        return
+    
     bookmarks = db.get_bookmarks(callback.from_user.id, limit=20)
     
     if not bookmarks:
         text = "📭 У вас пока нет закладок.\n\nПерешлите любое сообщение мне, чтобы сохранить его!"
-        # Используем безопасное редактирование
         try:
             await callback.message.edit_text(text, reply_markup=get_back_button("bookmarks_menu"))
         except Exception:
@@ -50,18 +84,42 @@ async def show_bookmarks(callback: CallbackQuery):
     await callback.answer()
 
 @router.callback_query(F.data == "bookmarks_add")
-async def add_bookmark_start(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        "📤 <b>Добавить закладку</b>\n\n"
-        "Перешлите мне любое сообщение, которое хотите сохранить:",
-        reply_markup=get_back_button("bookmarks_menu")
-    )
+async def add_bookmark_start(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    # 🔑 Проверка подписки
+    if not await is_subscribed(bot, callback.from_user.id):
+        await callback.answer("🔒 Для доступа к функциям бота подпишитесь на канал @bot_pro_bot_you", show_alert=True)
+        return
+    
+    try:
+        await callback.message.edit_text(
+            "📤 <b>Добавить закладку</b>\n\n"
+            "Перешлите мне любое сообщение, которое хотите сохранить:",
+            reply_markup=get_back_button("bookmarks_menu")
+        )
+    except Exception:
+        await callback.message.answer(
+            "📤 <b>Добавить закладку</b>\n\n"
+            "Перешлите мне любое сообщение, которое хотите сохранить:",
+            reply_markup=get_back_button("bookmarks_menu")
+        )
     await state.set_state(BookmarkStates.waiting_for_message)
     await callback.answer()
 
-# 🔑 ИСПРАВЛЕНО: Добавлена проверка state и безопасное сохранение
 @router.message(BookmarkStates.waiting_for_message)
-async def save_bookmark(message: Message, state: FSMContext):
+async def save_bookmark(message: Message, state: FSMContext, bot: Bot):
+    # 🔑 Проверка подписки
+    if not await is_subscribed(bot, message.from_user.id):
+        await message.answer(
+            "🔒 <b>Требуется подписка</b>\n\n"
+            "Чтобы пользоваться ботом, подпишитесь на наш канал:\n"
+            f"<a href='https://t.me/{REQUIRED_CHANNEL.lstrip('@')}'>{REQUIRED_CHANNEL}</a>",
+            reply_markup=get_back_button(),
+            disable_web_page_preview=True
+        )
+        if state is not None:
+            await state.clear()
+        return
+    
     # Определяем тип сообщения
     message_type = 'text'
     file_id = None
@@ -105,19 +163,39 @@ async def save_bookmark(message: Message, state: FSMContext):
     )
 
 @router.callback_query(F.data == "bookmarks_clear")
-async def clear_bookmarks_confirm(callback: CallbackQuery):
-    await callback.message.edit_text(
-        "⚠️ <b>Очистить все закладки?</b>\n\n"
-        "Это действие нельзя отменить!",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🗑️ Да, очистить", callback_data="bookmarks_clear_confirm")],
-            [InlineKeyboardButton(text="❌ Отмена", callback_data="bookmarks_menu")]
-        ])
-    )
+async def clear_bookmarks_confirm(callback: CallbackQuery, bot: Bot):
+    # 🔑 Проверка подписки
+    if not await is_subscribed(bot, callback.from_user.id):
+        await callback.answer("🔒 Для доступа к функциям бота подпишитесь на канал @bot_pro_bot_you", show_alert=True)
+        return
+    
+    try:
+        await callback.message.edit_text(
+            "⚠️ <b>Очистить все закладки?</b>\n\n"
+            "Это действие нельзя отменить!",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🗑️ Да, очистить", callback_data="bookmarks_clear_confirm")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="bookmarks_menu")]
+            ])
+        )
+    except Exception:
+        await callback.message.answer(
+            "⚠️ <b>Очистить все закладки?</b>\n\n"
+            "Это действие нельзя отменить!",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🗑️ Да, очистить", callback_data="bookmarks_clear_confirm")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="bookmarks_menu")]
+            ])
+        )
     await callback.answer()
 
 @router.callback_query(F.data == "bookmarks_clear_confirm")
-async def clear_bookmarks(callback: CallbackQuery):
+async def clear_bookmarks(callback: CallbackQuery, bot: Bot):
+    # 🔑 Проверка подписки
+    if not await is_subscribed(bot, callback.from_user.id):
+        await callback.answer("🔒 Для доступа к функциям бота подпишитесь на канал @bot_pro_bot_you", show_alert=True)
+        return
+    
     deleted = db.clear_bookmarks(callback.from_user.id)
     text = f"✅ Все закладки удалены ({deleted} шт.)."
     try:
@@ -127,8 +205,24 @@ async def clear_bookmarks(callback: CallbackQuery):
     await callback.answer()
 
 # 🔑 НОВАЯ ФУНКЦИЯ: Безопасное сохранение из обычного сообщения (без FSM)
-async def save_bookmark_simple(message: Message):
-    """Сохранение закладки без использования FSM (для авто-сохранения текста)"""
+async def save_bookmark_simple(message: Message, bot: Bot = None):
+    """
+    Сохранение закладки без использования FSM.
+    Параметр bot используется для проверки подписки.
+    """
+    # Если бот передан — проверяем подписку
+    if bot is not None:
+        if not await is_subscribed(bot, message.from_user.id):
+            await message.answer(
+                "🔒 <b>Требуется подписка</b>\n\n"
+                "Чтобы пользоваться ботом, подпишитесь на наш канал:\n"
+                f"<a href='https://t.me/{REQUIRED_CHANNEL.lstrip('@')}'>{REQUIRED_CHANNEL}</a>",
+                reply_markup=get_back_button(),
+                disable_web_page_preview=True
+            )
+            return
+    
+    # Определяем тип сообщения
     message_type = 'text'
     file_id = None
     
@@ -150,6 +244,7 @@ async def save_bookmark_simple(message: Message):
     else:
         content = ''
     
+    # Сохраняем в БД
     bookmark_id = db.add_bookmark(
         user_id=message.from_user.id,
         message_text=content,
@@ -161,6 +256,3 @@ async def save_bookmark_simple(message: Message):
         f"✅ <b>Сохранено в закладки!</b>\n\nID: #{bookmark_id}",
         reply_markup=get_back_button("bookmarks_menu")
     )
-
-# Экспортируем функцию для использования в bot.py
-__all__ = ['router', 'save_bookmark_simple']
