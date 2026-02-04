@@ -1,6 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
-from ..keyboards import get_settings_menu, get_language_menu, get_back_button
+from keyboards import get_settings_menu, get_language_menu, get_back_button
 
 router = Router()
 
@@ -32,7 +32,7 @@ async def set_language(callback: CallbackQuery):
         "zh": "🇨🇳 中文"
     }
     
-    # Здесь нужно сохранить выбор в БД (на этапе 2)
+    # TODO: Сохранить выбор языка в БД на следующем этапе
     
     await callback.message.edit_text(
         f"✅ Язык изменён на {languages.get(lang_code, lang_code)}",
@@ -49,8 +49,7 @@ async def about_bot(callback: CallbackQuery):
         "<b>Функции:</b>\n"
         "• 📌 Закладки — сохраняйте сообщения\n"
         "• ✅ Напоминания — не забывайте о важном\n"
-        "• 📝 Заметки — записывайте идеи\n"
-        "• 🤖 ИИ-помощник — генерация текстов\n\n"
+        "• 📝 Заметки — записывайте идеи\n\n"
         "Разработано с ❤️ для пользователей Telegram",
         reply_markup=get_back_button("settings_menu")
     )
