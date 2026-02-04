@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command, BaseFilter
-from aiogram.types import Message, CallbackQuery, ChatMember, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.enums import ChatMemberStatus
 from loguru import logger
@@ -75,25 +75,20 @@ class IsSubscriberFilter(BaseFilter):
     async def __call__(self, message: Message, bot: Bot) -> bool:
         user_id = message.from_user.id
         try:
-            # Проверяем статус пользователя в канале
             chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
             status = chat_member.status
-            
-            # Подписан, если статус: member, administrator, creator
             is_subscribed = status in [
                 ChatMemberStatus.MEMBER,
                 ChatMemberStatus.ADMINISTRATOR,
                 ChatMemberStatus.CREATOR
             ]
-            
             logger.debug(f"👤 Пользователь {user_id} в канале {REQUIRED_CHANNEL}: статус={status}, подписан={is_subscribed}")
             return is_subscribed
-            
         except Exception as e:
             logger.warning(f"⚠️ Ошибка проверки подписки для {user_id}: {e}")
             return False
 
-# ==================== ОБРАБОТЧИКИ БЕЗ ПОДПИСКИ ====================
+# ==================== ОБРАБОТЧИКИ ====================
 
 async def send_subscription_required(message: Message):
     """Отправить сообщение с требованием подписки"""
@@ -108,7 +103,6 @@ async def send_subscription_required(message: Message):
 
 @dp.message(Command("start"))
 async def start_handler(message: Message):
-    # Сохраняем пользователя в БД (даже без подписки)
     db.add_user(
         user_id=message.from_user.id,
         username=message.from_user.username,
@@ -117,10 +111,8 @@ async def start_handler(message: Message):
         language_code=message.from_user.language_code
     )
     
-    # Проверяем подписку
     chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, message.from_user.id)
-    status = chat_member.status
-    is_subscribed = status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+    is_subscribed = chat_member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
     
     if is_subscribed:
         await message.answer(
@@ -138,10 +130,8 @@ async def start_handler(message: Message):
 
 @dp.callback_query(lambda c: c.data == "check_subscription")
 async def check_subscription_callback(callback: CallbackQuery):
-    """Проверка подписки по кнопке"""
     chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, callback.from_user.id)
-    status = chat_member.status
-    is_subscribed = status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+    is_subscribed = chat_member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
     
     if is_subscribed:
         await callback.message.edit_text(
@@ -153,8 +143,6 @@ async def check_subscription_callback(callback: CallbackQuery):
         await callback.answer("🎉 Добро пожаловать!")
     else:
         await callback.answer("❌ Вы не подписаны на канал. Подпишитесь и попробуйте снова.", show_alert=True)
-
-# ==================== ЗАЩИЩЁННЫЕ ОБРАБОТЧИКИ (требуют подписки) ====================
 
 @dp.message(Command("help"), IsSubscriberFilter())
 async def help_handler(message: Message):
@@ -200,14 +188,12 @@ async def notes_command(message: Message):
 
 @dp.message(IsSubscriberFilter())
 async def handle_text(message: Message):
-    """Авто-определение типа сообщения (только для подписчиков)"""
     if not message.text:
-        await save_bookmark_simple(message)
+        await save_bookmark_simple(message, bot)
         return
         
     text_lower = message.text.lower()
     
-    # Распознавание напоминаний
     reminder_triggers = ["напомни", "напомнить", "напомни мне"]
     if any(trigger in text_lower for trigger in reminder_triggers):
         from handlers.reminders import add_reminder_start, ReminderStates
@@ -224,10 +210,7 @@ async def handle_text(message: Message):
         await state.set_state(ReminderStates.waiting_for_text)
         return
     
-    # Сохранение как закладки
-    await save_bookmark_simple(message)
-
-# ==================== CALLBACKS (требуют подписки) ====================
+    await save_bookmark_simple(message, bot)
 
 @dp.callback_query(lambda c: c.data == "menu_main", IsSubscriberFilter())
 async def back_to_main(callback: CallbackQuery):
@@ -245,7 +228,7 @@ async def back_to_main(callback: CallbackQuery):
         )
     await callback.answer()
 
-# Регистрация роутеров С ЗАЩИТОЙ
+# Регистрация роутеров
 dp.include_router(bookmarks_router)
 dp.include_router(reminders_router)
 dp.include_router(notes_router)
@@ -254,7 +237,6 @@ dp.include_router(settings_router)
 # ==================== ФОНОВАЯ ЗАДАЧА ====================
 
 async def check_reminders_task():
-    """Проверка напоминаний каждую минуту"""
     while True:
         try:
             due = db.get_due_reminders()
@@ -280,7 +262,6 @@ async def main():
     logger.info(f"🤖 Bot: @{(await bot.get_me()).username}")
     logger.info(f"🔒 Защита подпиской: канал {REQUIRED_CHANNEL}")
     
-    # Проверка подключения к БД
     try:
         stats = db.get_user_stats(123456789)
         logger.info("✅ Подключение к базе данных установлено")
@@ -288,10 +269,7 @@ async def main():
         logger.error(f"❌ Ошибка подключения к БД: {e}")
         sys.exit(1)
     
-    # Запуск фоновой задачи
     asyncio.create_task(check_reminders_task())
-    
-    # Запуск поллинга
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
