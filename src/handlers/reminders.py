@@ -3,8 +3,8 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from datetime import datetime, timedelta
-from ..database import db
-from ..keyboards import get_reminders_menu, get_back_button
+from database import db  # ← Абсолютный импорт!
+from keyboards import get_reminders_menu, get_back_button
 
 router = Router()
 
@@ -78,7 +78,7 @@ async def save_reminder(message: Message, state: FSMContext):
     text = data['text']
     time_input = message.text.lower()
     
-    # Простой парсер времени (на этапе 2 заменим на ИИ)
+    # Простой парсер времени
     now = datetime.now()
     
     if "сегодня" in time_input:
@@ -93,7 +93,8 @@ async def save_reminder(message: Message, state: FSMContext):
     else:
         # Попытка распарсить дату
         try:
-            base_date = datetime.strptime(time_input.split()[0], '%d.%m.%Y')
+            date_part = time_input.split()[0]
+            base_date = datetime.strptime(date_part, '%d.%m.%Y')
             time_input = ' '.join(time_input.split()[1:])
         except:
             base_date = now + timedelta(days=1)
