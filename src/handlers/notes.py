@@ -2,8 +2,8 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from ..database import db
-from ..keyboards import get_notes_menu, get_back_button
+from database import db  # ← Абсолютный импорт!
+from keyboards import get_notes_menu, get_back_button
 
 router = Router()
 
@@ -72,14 +72,16 @@ async def get_note_title(message: Message, state: FSMContext):
 async def save_note(message: Message, state: FSMContext):
     data = await state.get_data()
     title = data['title']
-    content = message.text
+    content = message.text if message.text else ''
     
     note_id = db.add_note(message.from_user.id, title, content)
+    
+    preview = content[:100] + '...' if len(content) > 100 else content
     
     await message.answer(
         f"✅ <b>Заметка создана!</b>\n\n"
         f"📌 {title}\n"
-        f"{content[:100] + '...' if len(content) > 100 else content}\n\n"
+        f"{preview}\n\n"
         f"ID: #{note_id}",
         reply_markup=get_back_button("notes_menu")
     )
