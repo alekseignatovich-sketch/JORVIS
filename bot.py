@@ -1,25 +1,26 @@
 #!/usr/bin/env python3
 """
 JARVIS — Telegram Personal Assistant Bot
-MVP Version 1.0 — Рабочая версия
+MVP Version 1.1 — С проверкой подписки на канал
 """
 import sys
 import os
 import asyncio
 from datetime import datetime
 from aiogram import Bot, Dispatcher
-from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.filters import Command, BaseFilter
+from aiogram.types import Message, CallbackQuery, ChatMember, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.enums import ChatMemberStatus
 from loguru import logger
 from dotenv import load_dotenv
 
-# 🔑 Добавляем корень проекта в PYTHONPATH (защита от ошибок импорта)
+# 🔑 Добавляем корень проекта в PYTHONPATH
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# Загрузка .env (для локальной разработки)
+# Загрузка .env
 if os.path.exists(".env"):
     load_dotenv()
 
@@ -30,6 +31,10 @@ logger.add(
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>",
     level="INFO"
 )
+
+# Получаем обязательный канал из переменных окружения
+REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@bot_pro_bot_you")
+logger.info(f"🔒 Требуемый канал для подписки: {REQUIRED_CHANNEL}")
 
 # Импорты из корня проекта
 try:
@@ -42,7 +47,7 @@ except ImportError as e:
     sys.exit(1)
 
 try:
-    from keyboards import get_main_menu, get_back_button
+    from keyboards import get_main_menu, get_back_button, get_subscription_keyboard
     from handlers.bookmarks import router as bookmarks_router, save_bookmark_simple
     from handlers.reminders import router as reminders_router, show_reminders_simple
     from handlers.notes import router as notes_router, show_notes_simple
@@ -63,16 +68,47 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Регистрация роутеров
-dp.include_router(bookmarks_router)
-dp.include_router(reminders_router)
-dp.include_router(notes_router)
-dp.include_router(settings_router)
+# ==================== ФИЛЬТР ПОДПИСКИ ====================
 
-# ==================== КОМАНДЫ ====================
+class IsSubscriberFilter(BaseFilter):
+    """Фильтр: пользователь подписан на канал"""
+    async def __call__(self, message: Message, bot: Bot) -> bool:
+        user_id = message.from_user.id
+        try:
+            # Проверяем статус пользователя в канале
+            chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
+            status = chat_member.status
+            
+            # Подписан, если статус: member, administrator, creator
+            is_subscribed = status in [
+                ChatMemberStatus.MEMBER,
+                ChatMemberStatus.ADMINISTRATOR,
+                ChatMemberStatus.CREATOR
+            ]
+            
+            logger.debug(f"👤 Пользователь {user_id} в канале {REQUIRED_CHANNEL}: статус={status}, подписан={is_subscribed}")
+            return is_subscribed
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Ошибка проверки подписки для {user_id}: {e}")
+            return False
+
+# ==================== ОБРАБОТЧИКИ БЕЗ ПОДПИСКИ ====================
+
+async def send_subscription_required(message: Message):
+    """Отправить сообщение с требованием подписки"""
+    await message.answer(
+        f"🔒 <b>Требуется подписка</b>\n\n"
+        f"Чтобы пользоваться ботом, подпишитесь на наш канал:\n"
+        f"<a href='https://t.me/{REQUIRED_CHANNEL.lstrip('@')}'>{REQUIRED_CHANNEL}</a>\n\n"
+        f"После подписки нажмите кнопку ниже для проверки 🔍",
+        reply_markup=get_subscription_keyboard(),
+        disable_web_page_preview=True
+    )
 
 @dp.message(Command("start"))
 async def start_handler(message: Message):
+    # Сохраняем пользователя в БД (даже без подписки)
     db.add_user(
         user_id=message.from_user.id,
         username=message.from_user.username,
@@ -81,18 +117,46 @@ async def start_handler(message: Message):
         language_code=message.from_user.language_code
     )
     
-    await message.answer(
-        "🤖 <b>Привет! Я JARVIS</b>\n\n"
-        "Ваш персональный ассистент внутри Telegram.\n\n"
-        "<b>Что я умею:</b>\n"
-        "• 📌 Сохранять сообщения в закладки\n"
-        "• ✅ Напоминать о важных делах\n"
-        "• 📝 Создавать заметки и списки\n\n"
-        "Выберите раздел ниже 👇",
-        reply_markup=get_main_menu()
-    )
+    # Проверяем подписку
+    chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, message.from_user.id)
+    status = chat_member.status
+    is_subscribed = status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+    
+    if is_subscribed:
+        await message.answer(
+            "🤖 <b>Привет! Я JARVIS</b>\n\n"
+            "Ваш персональный ассистент внутри Telegram.\n\n"
+            "<b>Что я умею:</b>\n"
+            "• 📌 Сохранять сообщения в закладки\n"
+            "• ✅ Напоминать о важных делах\n"
+            "• 📝 Создавать заметки и списки\n\n"
+            "Выберите раздел ниже 👇",
+            reply_markup=get_main_menu()
+        )
+    else:
+        await send_subscription_required(message)
 
-@dp.message(Command("help"))
+@dp.callback_query(lambda c: c.data == "check_subscription")
+async def check_subscription_callback(callback: CallbackQuery):
+    """Проверка подписки по кнопке"""
+    chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, callback.from_user.id)
+    status = chat_member.status
+    is_subscribed = status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+    
+    if is_subscribed:
+        await callback.message.edit_text(
+            "✅ <b>Подписка подтверждена!</b>\n\n"
+            "Теперь вы можете пользоваться всеми функциями бота.\n"
+            "Выберите раздел ниже 👇",
+            reply_markup=get_main_menu()
+        )
+        await callback.answer("🎉 Добро пожаловать!")
+    else:
+        await callback.answer("❌ Вы не подписаны на канал. Подпишитесь и попробуйте снова.", show_alert=True)
+
+# ==================== ЗАЩИЩЁННЫЕ ОБРАБОТЧИКИ (требуют подписки) ====================
+
+@dp.message(Command("help"), IsSubscriberFilter())
 async def help_handler(message: Message):
     await message.answer(
         "<b>📖 Помощь</b>\n\n"
@@ -107,9 +171,8 @@ async def help_handler(message: Message):
         reply_markup=get_main_menu()
     )
 
-@dp.message(Command("bookmarks"))
+@dp.message(Command("bookmarks"), IsSubscriberFilter())
 async def bookmarks_command(message: Message):
-    """Показать закладки через команду"""
     bookmarks = db.get_bookmarks(message.from_user.id, limit=20)
     
     if not bookmarks:
@@ -127,41 +190,18 @@ async def bookmarks_command(message: Message):
     
     await message.answer(text, reply_markup=get_back_button("bookmarks_menu"))
 
-@dp.message(Command("reminders"))
+@dp.message(Command("reminders"), IsSubscriberFilter())
 async def reminders_command(message: Message):
-    """Показать напоминания через команду"""
     await show_reminders_simple(message)
 
-@dp.message(Command("notes"))
+@dp.message(Command("notes"), IsSubscriberFilter())
 async def notes_command(message: Message):
-    """Показать заметки через команду"""
     await show_notes_simple(message)
 
-# ==================== CALLBACKS ====================
-
-@dp.callback_query(lambda c: c.data == "menu_main")
-async def back_to_main(callback: CallbackQuery):
-    try:
-        await callback.message.edit_text(
-            "🤖 <b>JARVIS — Главное меню</b>\n\n"
-            "Выберите раздел:",
-            reply_markup=get_main_menu()
-        )
-    except Exception:
-        await callback.message.answer(
-            "🤖 <b>JARVIS — Главное меню</b>\n\n"
-            "Выберите раздел:",
-            reply_markup=get_main_menu()
-        )
-    await callback.answer()
-
-# ==================== ОСНОВНОЙ ОБРАБОТЧИК ТЕКСТА ====================
-
-@dp.message()
+@dp.message(IsSubscriberFilter())
 async def handle_text(message: Message):
-    """Авто-определение типа сообщения"""
+    """Авто-определение типа сообщения (только для подписчиков)"""
     if not message.text:
-        # Если нет текста (фото/документ без подписи) — сохраняем как закладку
         await save_bookmark_simple(message)
         return
         
@@ -186,6 +226,30 @@ async def handle_text(message: Message):
     
     # Сохранение как закладки
     await save_bookmark_simple(message)
+
+# ==================== CALLBACKS (требуют подписки) ====================
+
+@dp.callback_query(lambda c: c.data == "menu_main", IsSubscriberFilter())
+async def back_to_main(callback: CallbackQuery):
+    try:
+        await callback.message.edit_text(
+            "🤖 <b>JARVIS — Главное меню</b>\n\n"
+            "Выберите раздел:",
+            reply_markup=get_main_menu()
+        )
+    except Exception:
+        await callback.message.answer(
+            "🤖 <b>JARVIS — Главное меню</b>\n\n"
+            "Выберите раздел:",
+            reply_markup=get_main_menu()
+        )
+    await callback.answer()
+
+# Регистрация роутеров С ЗАЩИТОЙ
+dp.include_router(bookmarks_router)
+dp.include_router(reminders_router)
+dp.include_router(notes_router)
+dp.include_router(settings_router)
 
 # ==================== ФОНОВАЯ ЗАДАЧА ====================
 
@@ -214,6 +278,7 @@ async def check_reminders_task():
 async def main():
     logger.info("🚀 Запуск бота JARVIS...")
     logger.info(f"🤖 Bot: @{(await bot.get_me()).username}")
+    logger.info(f"🔒 Защита подпиской: канал {REQUIRED_CHANNEL}")
     
     # Проверка подключения к БД
     try:
