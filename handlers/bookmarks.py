@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from database import db  # ← Абсолютный импорт из корня!
+from database import db
 from keyboards import get_bookmarks_menu, get_back_button
 
 router = Router()
@@ -27,25 +27,26 @@ async def show_bookmarks(callback: CallbackQuery):
     bookmarks = db.get_bookmarks(callback.from_user.id, limit=20)
     
     if not bookmarks:
-        await callback.message.edit_text(
-            "📭 У вас пока нет закладок.\n\n"
-            "Перешлите любое сообщение мне, чтобы сохранить его!",
-            reply_markup=get_back_button("bookmarks_menu")
-        )
+        text = "📭 У вас пока нет закладок.\n\nПерешлите любое сообщение мне, чтобы сохранить его!"
+        # Используем безопасное редактирование
+        try:
+            await callback.message.edit_text(text, reply_markup=get_back_button("bookmarks_menu"))
+        except Exception:
+            await callback.message.answer(text, reply_markup=get_back_button("bookmarks_menu"))
         return
     
     text = "📌 <b>Ваши закладки</b>:\n\n"
-    for i, bm in enumerate(bookmarks[:10], 1):  # Показываем первые 10
+    for i, bm in enumerate(bookmarks[:10], 1):
         content = bm['message_text'][:50] + "..." if bm['message_text'] and len(bm['message_text']) > 50 else bm['message_text']
         text += f"{i}. {content or '📎 Файл/медиа'}\n"
     
     if len(bookmarks) > 10:
         text += f"\n...и ещё {len(bookmarks) - 10} закладок"
     
-    await callback.message.edit_text(
-        text,
-        reply_markup=get_back_button("bookmarks_menu")
-    )
+    try:
+        await callback.message.edit_text(text, reply_markup=get_back_button("bookmarks_menu"))
+    except Exception:
+        await callback.message.answer(text, reply_markup=get_back_button("bookmarks_menu"))
     await callback.answer()
 
 @router.callback_query(F.data == "bookmarks_add")
@@ -58,6 +59,7 @@ async def add_bookmark_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BookmarkStates.waiting_for_message)
     await callback.answer()
 
+# 🔑 ИСПРАВЛЕНО: Добавлена проверка state и безопасное сохранение
 @router.message(BookmarkStates.waiting_for_message)
 async def save_bookmark(message: Message, state: FSMContext):
     # Определяем тип сообщения
@@ -90,6 +92,10 @@ async def save_bookmark(message: Message, state: FSMContext):
         file_id=file_id
     )
     
+    # 🔑 ВАЖНО: Проверяем, что state существует перед очисткой
+    if state is not None:
+        await state.clear()
+    
     await message.answer(
         f"✅ <b>Сохранено!</b>\n\n"
         f"Закладка #{bookmark_id} добавлена.\n"
@@ -97,7 +103,6 @@ async def save_bookmark(message: Message, state: FSMContext):
         f"Посмотреть все: /bookmarks",
         reply_markup=get_back_button("bookmarks_menu")
     )
-    await state.clear()
 
 @router.callback_query(F.data == "bookmarks_clear")
 async def clear_bookmarks_confirm(callback: CallbackQuery):
@@ -114,8 +119,48 @@ async def clear_bookmarks_confirm(callback: CallbackQuery):
 @router.callback_query(F.data == "bookmarks_clear_confirm")
 async def clear_bookmarks(callback: CallbackQuery):
     deleted = db.clear_bookmarks(callback.from_user.id)
-    await callback.message.edit_text(
-        f"✅ Все закладки удалены ({deleted} шт.).",
+    text = f"✅ Все закладки удалены ({deleted} шт.)."
+    try:
+        await callback.message.edit_text(text, reply_markup=get_back_button("bookmarks_menu"))
+    except Exception:
+        await callback.message.answer(text, reply_markup=get_back_button("bookmarks_menu"))
+    await callback.answer()
+
+# 🔑 НОВАЯ ФУНКЦИЯ: Безопасное сохранение из обычного сообщения (без FSM)
+async def save_bookmark_simple(message: Message):
+    """Сохранение закладки без использования FSM (для авто-сохранения текста)"""
+    message_type = 'text'
+    file_id = None
+    
+    if message.text:
+        message_type = 'text'
+        content = message.text
+    elif message.photo:
+        message_type = 'photo'
+        file_id = message.photo[-1].file_id
+        content = message.caption or ''
+    elif message.document:
+        message_type = 'document'
+        file_id = message.document.file_id
+        content = message.caption or ''
+    elif message.video:
+        message_type = 'video'
+        file_id = message.video.file_id
+        content = message.caption or ''
+    else:
+        content = ''
+    
+    bookmark_id = db.add_bookmark(
+        user_id=message.from_user.id,
+        message_text=content,
+        message_type=message_type,
+        file_id=file_id
+    )
+    
+    await message.reply(
+        f"✅ <b>Сохранено в закладки!</b>\n\nID: #{bookmark_id}",
         reply_markup=get_back_button("bookmarks_menu")
     )
-    await callback.answer()
+
+# Экспортируем функцию для использования в bot.py
+__all__ = ['router', 'save_bookmark_simple']
