@@ -2,8 +2,8 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from ..database import db
-from ..keyboards import get_bookmarks_menu, get_back_button
+from database import db  # ← Абсолютный импорт из корня!
+from keyboards import get_bookmarks_menu, get_back_button
 
 router = Router()
 
@@ -113,9 +113,9 @@ async def clear_bookmarks_confirm(callback: CallbackQuery):
 
 @router.callback_query(F.data == "bookmarks_clear_confirm")
 async def clear_bookmarks(callback: CallbackQuery):
-    # Здесь нужно добавить метод очистки в БД
+    deleted = db.clear_bookmarks(callback.from_user.id)
     await callback.message.edit_text(
-        "✅ Все закладки удалены.",
+        f"✅ Все закладки удалены ({deleted} шт.).",
         reply_markup=get_back_button("bookmarks_menu")
     )
     await callback.answer()
