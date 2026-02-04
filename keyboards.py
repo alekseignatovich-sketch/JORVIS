@@ -1,6 +1,5 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
-# Главное меню (стиль Mihome — минимализм + иконки)
 def get_main_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -11,7 +10,6 @@ def get_main_menu() -> ReplyKeyboardMarkup:
         one_time_keyboard=False
     )
 
-# Меню закладок
 def get_bookmarks_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📚 Все закладки", callback_data="bookmarks_list")],
@@ -20,7 +18,6 @@ def get_bookmarks_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_main")]
     ])
 
-# Меню напоминаний
 def get_reminders_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Мои напоминания", callback_data="reminders_list")],
@@ -28,7 +25,6 @@ def get_reminders_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_main")]
     ])
 
-# Меню заметок
 def get_notes_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📄 Все заметки", callback_data="notes_list")],
@@ -36,7 +32,6 @@ def get_notes_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_main")]
     ])
 
-# Меню настроек
 def get_settings_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🌐 Язык", callback_data="settings_language")],
@@ -44,17 +39,22 @@ def get_settings_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_main")]
     ])
 
-# Кнопка "Назад"
-def get_back_button(callback_data: str = "menu_main") -> InlineKeyboardMarkup:
+def get_back_button(callback_ str = "menu_main") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=callback_data)]
     ])
 
-# Кнопки выбора языка
 def get_language_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang_ru")],
         [InlineKeyboardButton(text="🇺🇸 English", callback_data="lang_en")],
         [InlineKeyboardButton(text="🇨🇳 中文", callback_data="lang_zh")],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings_menu")]
+    ])
+
+# 🔑 НОВАЯ КЛАВИАТУРА: Требование подписки
+def get_subscription_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📺 Перейти в канал", url="https://t.me/bot_pro_bot_you")],
+        [InlineKeyboardButton(text="🔍 Проверить подписку", callback_data="check_subscription")]
     ])
