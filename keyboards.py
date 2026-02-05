@@ -39,8 +39,8 @@ def get_settings_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_main")]
     ])
 
-# 🔑 ИСПРАВЛЕНО: правильное определение параметра (было: callback_ str)
-def get_back_button(callback_data: str = "menu_main") -> InlineKeyboardMarkup:
+# 🔑 ИСПРАВЛЕНО: правильная аннотация типа (было: callback_ str)
+def get_back_button(callback_ str = "menu_main") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=callback_data)]
     ])
@@ -53,7 +53,6 @@ def get_language_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="settings_menu")]
     ])
 
-# 🔑 Клавиатура для проверки подписки
 def get_subscription_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📺 Перейти в канал", url="https://t.me/bot_pro_bot_you")],
