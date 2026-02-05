@@ -39,8 +39,8 @@ def get_settings_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад", callback_data="menu_main")]
     ])
 
-# 🔑 ИСПРАВЛЕНО: правильная аннотация типа (было: callback_ str)
-def get_back_button(callback_ str = "menu_main") -> InlineKeyboardMarkup:
+# 🔑 ИСПРАВЛЕНО: правильный синтаксис аннотации типа (было: callback_ str → стало: callback_data: str)
+def get_back_button(callback_data: str = "menu_main") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=callback_data)]
     ])
