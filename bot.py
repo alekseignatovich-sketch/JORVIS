@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-JARVIS Lite — Ультра-минималистичные заметки
-✅ Постоянная клавиатура внизу чата (как в заметках Viber)
-✅ Без тегов — просто текст
-✅ При каждом сообщении: «✅ Сохранено!»
-✅ Простой поиск по тексту заметок
+JARVIS Lite — Заметки с живым голосом
+✅ Постоянная клавиатура внизу (как в Viber)
+✅ Персональное обращение по имени: «Привет, Алексей!»
+✅ Эмоциональные ответы с эмодзи (голос бота)
+✅ При каждом сообщении: живое подтверждение ✨🚀🌙
 🔒 Обязательная подписка на @bot_pro_bot_you
 """
 import os
@@ -81,8 +81,36 @@ SMART_PHRASES_RU = [
     "Завтрашний ты скажет спасибо сегодняшнему за эту заметку 🙏"
 ]
 
+# 🎙️ «Голос» бота — эмодзи по времени суток
+VOICE_MOODS = {
+    "morning": [
+        ("☕", "Утренняя мысль сохранена!"),
+        ("🌅", "Рассвет идей — записал!"),
+        ("🌤️", "Солнечная заметка в архиве!"),
+        ("🌻", "Цветущая идея сохранена!")
+    ],
+    "day": [
+        ("🚀", "Заметка в деле!"),
+        ("💡", "Идея поймана!"),
+        ("⚡", "Молниеносно записал!"),
+        ("🌈", "Радужная мысль сохранена!")
+    ],
+    "evening": [
+        ("🌙", "Вечерняя мысль надёжно спрятана!"),
+        ("🕯️", "Тихий огонёк идеи — сохранён!"),
+        ("🌌", "Звёздная заметка в архиве!"),
+        ("📖", "Глава мыслей записана!")
+    ],
+    "night": [
+        ("🌠", "Ночная идея поймана!"),
+        ("😴", "Тихо сохранил — спи спокойно!"),
+        ("✨", "Мерцающая мысль в архиве!"),
+        ("🌌", "Лунная заметка сохранена!")
+    ]
+}
+
 # Состояния пользователей для поиска
-user_search_state = set()  # Используем множество для простоты
+user_search_state = set()
 
 # ==================== БАЗА ДАННЫХ ====================
 
@@ -139,7 +167,6 @@ def get_db_session():
         session.close()
 
 def add_note(user_id: int, content: str) -> int:
-    """Сохранить заметку БЕЗ тегов"""
     with get_db_session() as session:
         note = Note(user_id=user_id, content=content)
         session.add(note)
@@ -147,7 +174,6 @@ def add_note(user_id: int, content: str) -> int:
         return note.id
 
 def search_notes(user_id: int, query: str) -> List[Dict]:
-    """Простой поиск по тексту заметок"""
     with get_db_session() as session:
         notes = session.query(Note)\
             .filter(
@@ -163,7 +189,6 @@ def search_notes(user_id: int, query: str) -> List[Dict]:
         } for n in notes]
 
 def get_or_create_user(user_id: int, username: str = None, first_name: str = None, last_name: str = None):
-    """Получить или создать пользователя"""
     with get_db_session() as session:
         user = session.query(User).filter(User.user_id == user_id).first()
         if not user:
@@ -175,14 +200,14 @@ def get_or_create_user(user_id: int, username: str = None, first_name: str = Non
             )
             session.add(user)
             session.flush()
-            return {'user_id': user.user_id, 'first_name': user.first_name}
+            return {'user_id': user.user_id, 'first_name': user.first_name, 'username': user.username}
         else:
             user.username = username
             user.first_name = first_name
             user.last_name = last_name
             user.last_active = datetime.now()
             session.flush()
-            return {'user_id': user.user_id, 'first_name': user.first_name}
+            return {'user_id': user.user_id, 'first_name': user.first_name, 'username': user.username}
 
 # ==================== ИМПОРТ КЛАВИАТУР ====================
 
@@ -195,7 +220,7 @@ async def is_subscribed(user_id: int) -> bool:
         member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
         return member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
     except (TelegramBadRequest, TelegramForbiddenError):
-        return True  # При ошибке канала — пропускаем
+        return True
     except Exception:
         return False
 
@@ -227,15 +252,21 @@ async def start_handler(message: Message):
         message.from_user.last_name
     )
     
+    # 🎙️ Персональное обращение по имени
+    name = user['first_name'] or user['username'] or "друг"
+    name = name.split()[0]  # Только первое имя
+    
+    # 🌍 Приветствие на случайном языке
     flag, greeting_word = random.choice(GREETINGS)
+    
+    # 🇷🇺 Умная фраза на русском
     smart_phrase = random.choice(SMART_PHRASES_RU)
-    name = (user['first_name'] or "друг").split()[0]
     
     await message.answer(
         f"👋 <b>{greeting_word}, {name}!</b> {flag}\n\n"
         f"<i>{smart_phrase}</i>\n\n"
-        "📝 Просто пиши — я сохраню.\n"
-        "🔍 Нажми кнопку внизу, чтобы найти заметку.",
+        "📝 Просто пиши — я запомню.\n"
+        "🔍 Ищи что угодно по словам.",
         reply_markup=get_main_keyboard()
     )
 
@@ -245,12 +276,22 @@ async def start_menu(message: Message):
         await send_subscription_required(message)
         return
     
+    user = get_or_create_user(
+        message.from_user.id,
+        message.from_user.username,
+        message.from_user.first_name,
+        message.from_user.last_name
+    )
+    
+    name = (user['first_name'] or user['username'] or "друг").split()[0]
+    
     await message.answer(
-        "✨ <b>JARVIS Lite</b>\n\n"
-        "Простые заметки с душой:\n"
-        "• Пиши — сохраняю автоматически ✅\n"
-        "• Ищи по словам в один клик 🔍\n\n"
-        "Начни прямо сейчас — напиши свою первую заметку!",
+        f"✨ Привет, {name}!\n\n"
+        "Я — твой цифровой ассистент для заметок.\n"
+        "• Пиши — я запомню ✍️\n"
+        "• Ищи — я найду 🔍\n"
+        "• Не переживай — ничего не потеряется 💾\n\n"
+        "Что запишем сегодня?",
         reply_markup=get_main_keyboard()
     )
 
@@ -262,8 +303,7 @@ async def search_start(message: Message):
     
     user_search_state.add(message.from_user.id)
     await message.answer(
-        "🔍 <b>Поиск</b>\n\n"
-        "Введите слово или фразу для поиска:",
+        "🔍 Введи слово или фразу для поиска:",
         reply_markup=get_search_keyboard()
     )
 
@@ -271,19 +311,19 @@ async def search_start(message: Message):
 async def cancel_search(message: Message):
     if message.from_user.id in user_search_state:
         user_search_state.remove(message.from_user.id)
-    await message.answer("Поиск отменён", reply_markup=get_main_keyboard())
+    await message.answer("Поиск отменён ✅", reply_markup=get_main_keyboard())
 
 @dp.message(Command("help"))
 async def help_handler(message: Message):
     await message.answer(
-        "💡 <b>Как пользоваться</b>\n\n"
-        "✨ <b>Сохранение:</b>\n"
-        "Просто напиши или перешли сообщение — я сохраню его.\n"
-        "Ответ: «✅ Сохранено!»\n\n"
+        "💡 <b>Как я работаю</b>\n\n"
+        "🗣️ <b>Мой голос:</b>\n"
+        "Я разговариваю с тобой как живой ассистент — обращаюсь по имени, подстраиваюсь под время суток.\n\n"
+        "📝 <b>Сохранение:</b>\n"
+        "Просто напиши или перешли сообщение — я мгновенно запомню.\n"
+        "Ответ: живое подтверждение с эмодзи ✨🚀🌙\n\n"
         "🔍 <b>Поиск:</b>\n"
-        "1. Нажми «🔍 Поиск» внизу экрана\n"
-        "2. Введи слово или фразу\n"
-        "3. Я покажу все подходящие заметки",
+        "Нажми «🔍 Поиск» → введи слово → я покажу все подходящие заметки.",
         reply_markup=get_main_keyboard()
     )
 
@@ -295,7 +335,7 @@ async def message_handler(message: Message):
         await send_subscription_required(message)
         return
     
-    get_or_create_user(
+    user = get_or_create_user(
         user_id,
         message.from_user.username,
         message.from_user.first_name,
@@ -306,14 +346,13 @@ async def message_handler(message: Message):
     if user_id in user_search_state:
         query = message.text.strip()
         
-        # Проверка на кнопку отмены (на случай если пользователь написал текстом)
         if query == "❌ Отменить поиск":
             user_search_state.discard(user_id)
-            await message.answer("Поиск отменён", reply_markup=get_main_keyboard())
+            await message.answer("Поиск отменён ✅", reply_markup=get_main_keyboard())
             return
         
         if not query:
-            await message.answer("⚠️ Введите текст для поиска", reply_markup=get_search_keyboard())
+            await message.answer("⚠️ Введи текст для поиска", reply_markup=get_search_keyboard())
             return
         
         user_search_state.discard(user_id)
@@ -321,17 +360,17 @@ async def message_handler(message: Message):
         
         if not results:
             await message.answer(
-                f"📭 Не найдено заметок по запросу «<code>{query}</code>»",
+                f"📭 Не нашёл заметок по «<code>{query}</code>»",
                 reply_markup=get_main_keyboard()
             )
             return
         
-        text = f"✅ Найдено {len(results)} заметок:\n\n"
+        text = f"✅ Нашёл {len(results)} заметок:\n\n"
         for i, note in enumerate(results[:10], 1):
             text += f"{i}. {note['content']}\n\n"
         
         if len(results) > 10:
-            text += f"...и ещё {len(results) - 10} заметок"
+            text += f"...и ещё {len(results) - 10}"
         
         await message.answer(text, reply_markup=get_main_keyboard())
         return
@@ -349,18 +388,36 @@ async def message_handler(message: Message):
         content = (message.caption or "") + "\n[🎤 Голосовое]"
     
     if not content.strip():
-        await message.reply("💭 Пустые сообщения не сохраняю")
+        await message.reply("💭 Пустые мысли не ловлю. Напиши что-нибудь!")
         return
     
     add_note(user_id, content)
     
-    # ✅ Мгновенное подтверждение
-    await message.reply("✅ Сохранено!", reply_markup=get_main_keyboard())
+    # 🎙️ ЖИВОЙ ГОЛОС БОТА — разные эмодзи и фразы по времени суток
+    hour = datetime.now().hour
+    if 5 <= hour < 12:
+        mood, phrase = random.choice(VOICE_MOODS["morning"])
+    elif 12 <= hour < 18:
+        mood, phrase = random.choice(VOICE_MOODS["day"])
+    elif 18 <= hour < 23:
+        mood, phrase = random.choice(VOICE_MOODS["evening"])
+    else:
+        mood, phrase = random.choice(VOICE_MOODS["night"])
+    
+    # Персональное обращение (иногда)
+    name = user['first_name'] or user['username'] or None
+    if name and random.random() < 0.3:  # 30% шанс обратиться по имени
+        name = name.split()[0]
+        response = f"{mood} {phrase}, {name}!"
+    else:
+        response = f"{mood} {phrase}"
+    
+    await message.reply(response, reply_markup=get_main_keyboard())
 
 # ==================== ЗАПУСК ====================
 
 async def main():
-    logger.info("🚀 Запуск JARVIS Lite (постоянная клавиатура внизу)")
+    logger.info("🚀 Запуск JARVIS Lite с живым голосом")
     logger.info(f"🤖 Бот: @{(await bot.get_me()).username}")
     logger.info(f"🔒 Подписка: {REQUIRED_CHANNEL}")
     logger.info(f"💾 База данных: {DATABASE_URL}")
