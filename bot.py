@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 JARVIS — Telegram Personal Assistant Bot
-MVP Version 1.1 — С проверкой подписки на канал
+MVP Version 1.2 — С защитой от ошибок подписки
 """
 import sys
 import os
@@ -12,6 +12,7 @@ from aiogram.filters import Command, BaseFilter
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.enums import ChatMemberStatus
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -32,8 +33,9 @@ logger.add(
     level="INFO"
 )
 
-# Получаем обязательный канал из переменных окружения
+# Получаем канал из переменных окружения
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@bot_pro_bot_you")
+CHANNEL_ACCESSIBLE = True  # Флаг: доступен ли канал для проверки
 logger.info(f"🔒 Требуемый канал для подписки: {REQUIRED_CHANNEL}")
 
 # Импорты из корня проекта
@@ -42,8 +44,6 @@ try:
     logger.info("✅ Модуль 'database' успешно импортирован")
 except ImportError as e:
     logger.error(f"❌ Ошибка импорта 'database': {e}")
-    logger.error(f"Текущая директория: {os.getcwd()}")
-    logger.error(f"Содержимое директории: {os.listdir('.')}")
     sys.exit(1)
 
 try:
@@ -55,24 +55,29 @@ try:
     logger.info("✅ Все модули успешно импортированы")
 except ImportError as e:
     logger.error(f"❌ Ошибка импорта модулей: {e}")
-    import traceback
-    traceback.print_exc()
     sys.exit(1)
 
 # Инициализация бота
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    logger.error("❌ BOT_TOKEN не найден! Установите переменную окружения BOT_TOKEN в Railway")
+    logger.error("❌ BOT_TOKEN не найден!")
     sys.exit(1)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# ==================== ФИЛЬТР ПОДПИСКИ ====================
+# ==================== ФИЛЬТР ПОДПИСКИ (с защитой от ошибок) ====================
 
 class IsSubscriberFilter(BaseFilter):
-    """Фильтр: пользователь подписан на канал"""
+    """Фильтр: пользователь подписан на канал (с обработкой ошибок)"""
     async def __call__(self, message: Message, bot: Bot) -> bool:
+        global CHANNEL_ACCESSIBLE
+        
+        # Если канал недоступен — пропускаем проверку (бот работает без защиты)
+        if not CHANNEL_ACCESSIBLE:
+            logger.warning("⚠️ Канал недоступен для проверки — пропускаем защиту подпиской")
+            return True
+        
         user_id = message.from_user.id
         try:
             chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
@@ -82,10 +87,21 @@ class IsSubscriberFilter(BaseFilter):
                 ChatMemberStatus.ADMINISTRATOR,
                 ChatMemberStatus.CREATOR
             ]
-            logger.debug(f"👤 Пользователь {user_id} в канале {REQUIRED_CHANNEL}: статус={status}, подписан={is_subscribed}")
+            logger.debug(f"👤 Пользователь {user_id}: статус={status}, подписан={is_subscribed}")
             return is_subscribed
+            
+        except (TelegramBadRequest, TelegramForbiddenError) as e:
+            # Канал недоступен для проверки — отключаем защиту
+            if "member list is inaccessible" in str(e) or "chat not found" in str(e):
+                logger.error(f"❌ Канал {REQUIRED_CHANNEL} недоступен для проверки подписки!")
+                logger.error(f"   Причина: {e}")
+                logger.error(f"   Решение: Добавьте бота @{(await bot.get_me()).username} как администратора канала с правом «Просматривать участников»")
+                CHANNEL_ACCESSIBLE = False
+                return True  # Пропускаем пользователя (защита отключена)
+            return False
+            
         except Exception as e:
-            logger.warning(f"⚠️ Ошибка проверки подписки для {user_id}: {e}")
+            logger.warning(f"⚠️ Ошибка проверки подписки: {e}")
             return False
 
 # ==================== ОБРАБОТЧИКИ ====================
@@ -111,8 +127,22 @@ async def start_handler(message: Message):
         language_code=message.from_user.language_code
     )
     
-    chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, message.from_user.id)
-    is_subscribed = chat_member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+    global CHANNEL_ACCESSIBLE
+    
+    # Проверяем подписку только если канал доступен
+    if CHANNEL_ACCESSIBLE:
+        try:
+            chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, message.from_user.id)
+            is_subscribed = chat_member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+        except (TelegramBadRequest, TelegramForbiddenError) as e:
+            if "member list is inaccessible" in str(e):
+                logger.error(f"❌ Канал недоступен: {e}")
+                CHANNEL_ACCESSIBLE = False
+                is_subscribed = True  # Пропускаем пользователя
+            else:
+                is_subscribed = False
+    else:
+        is_subscribed = True  # Канал недоступен — пропускаем всех
     
     if is_subscribed:
         await message.answer(
@@ -130,8 +160,33 @@ async def start_handler(message: Message):
 
 @dp.callback_query(lambda c: c.data == "check_subscription")
 async def check_subscription_callback(callback: CallbackQuery):
-    chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, callback.from_user.id)
-    is_subscribed = chat_member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+    global CHANNEL_ACCESSIBLE
+    
+    if not CHANNEL_ACCESSIBLE:
+        await callback.message.edit_text(
+            "⚠️ <b>Временно недоступно</b>\n\n"
+            "Проверка подписки отключена из-за технических ограничений.\n"
+            "Все функции бота доступны без подписки.",
+            reply_markup=get_main_menu()
+        )
+        await callback.answer("✅ Доступ разрешён")
+        return
+    
+    try:
+        chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, callback.from_user.id)
+        is_subscribed = chat_member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+    except (TelegramBadRequest, TelegramForbiddenError) as e:
+        if "member list is inaccessible" in str(e):
+            CHANNEL_ACCESSIBLE = False
+            await callback.message.edit_text(
+                "⚠️ <b>Ошибка доступа к каналу</b>\n\n"
+                "Администратор временно отключил проверку подписки.\n"
+                "Все функции доступны.",
+                reply_markup=get_main_menu()
+            )
+            await callback.answer("✅ Доступ разрешён")
+            return
+        is_subscribed = False
     
     if is_subscribed:
         await callback.message.edit_text(
@@ -143,6 +198,8 @@ async def check_subscription_callback(callback: CallbackQuery):
         await callback.answer("🎉 Добро пожаловать!")
     else:
         await callback.answer("❌ Вы не подписаны на канал. Подпишитесь и попробуйте снова.", show_alert=True)
+
+# ... остальные обработчики без изменений (как в предыдущей версии) ...
 
 @dp.message(Command("help"), IsSubscriberFilter())
 async def help_handler(message: Message):
@@ -247,7 +304,6 @@ async def check_reminders_task():
                         text=f"⏰ <b>Напоминание!</b>\n\n{reminder['text']}"
                     )
                     db.mark_reminder_completed(reminder['id'])
-                    logger.info(f"✅ Отправлено напоминание #{reminder['id']} пользователю {reminder['user_id']}")
                 except Exception as e:
                     logger.error(f"❌ Ошибка отправки напоминания {reminder['id']}: {e}")
             await asyncio.sleep(60)
@@ -259,8 +315,23 @@ async def check_reminders_task():
 
 async def main():
     logger.info("🚀 Запуск бота JARVIS...")
-    logger.info(f"🤖 Bot: @{(await bot.get_me()).username}")
+    me = await bot.get_me()
+    logger.info(f"🤖 Bot: @{me.username} (id={me.id})")
     logger.info(f"🔒 Защита подпиской: канал {REQUIRED_CHANNEL}")
+    
+    # Тестовый запрос к каналу для проверки доступа
+    global CHANNEL_ACCESSIBLE
+    try:
+        await bot.get_chat_member(REQUIRED_CHANNEL, me.id)
+        logger.info("✅ Доступ к каналу подтверждён (бот является администратором)")
+    except (TelegramBadRequest, TelegramForbiddenError) as e:
+        if "member list is inaccessible" in str(e):
+            logger.warning("⚠️ Канал недоступен для проверки подписки!")
+            logger.warning(f"   Причина: {e}")
+            logger.warning(f"   Решение: Добавьте бота @{me.username} как администратора канала {REQUIRED_CHANNEL} с правом «Просматривать участники»")
+            CHANNEL_ACCESSIBLE = False
+        else:
+            logger.warning(f"⚠️ Неизвестная ошибка доступа к каналу: {e}")
     
     try:
         stats = db.get_user_stats(123456789)
