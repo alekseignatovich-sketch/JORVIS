@@ -1,18 +1,31 @@
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-def get_main_keyboard() -> InlineKeyboardMarkup:
+def get_main_keyboard() -> ReplyKeyboardMarkup:
     """
-    Основная клавиатура с двумя кнопками как в заметках Viber:
-    • 🚀 Старт — краткая инструкция
-    • 🔍 Поиск — поиск по тексту заметок
+    Постоянная клавиатура внизу чата (как в заметках Viber)
+    Две кнопки в один ряд для минимализма
     """
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚀 Старт", callback_data="start_menu")],
-        [InlineKeyboardButton(text="🔍 Поиск", callback_data="search")]
-    ])
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="🚀 Старт"),
+                KeyboardButton(text="🔍 Поиск")
+            ]
+        ],
+        resize_keyboard=True,      # Адаптивный размер под устройство
+        one_time_keyboard=False,   # Клавиатура всегда видна (не скрывается после нажатия)
+        input_field_placeholder="Напишите заметку или нажмите 🔍 Поиск..."  # Подсказка в поле ввода
+    )
 
-def get_search_cancel_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура отмены поиска"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_search")]
-    ])
+def get_search_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Клавиатура во время поиска — только отмена
+    """
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="❌ Отменить поиск")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        input_field_placeholder="Введите слово для поиска..."
+    )
