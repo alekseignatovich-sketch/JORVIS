@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
 """
-JARVIS Lite — Минималистичный бот для заметок с душой
-✅ Исправленный поиск по тегам
+JARVIS Lite — Минималистичный бот для заметок
+✅ Исправленный поиск по тегам (точное совпадение)
 ✅ Приветствие + умная фраза — отдельные сообщения
-✅ Только кнопка «Поиск» (минимализм)
-✅ Ежедневное приветствие в 9:00 по будням
-✅ Персональный «голос» с именем пользователя
+✅ Только кнопка «Поиск» (минимализм как в Viber)
+✅ Умное приветствие при первом /start в день (без спама!)
+✅ Персональный «голос» с эмодзи времени суток
 🔒 Обязательная подписка на @bot_pro_bot_you
 """
 import os
 import sys
 import random
 import asyncio
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from typing import List, Dict
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -40,9 +38,8 @@ if not BOT_TOKEN:
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-scheduler = AsyncIOScheduler()
 
-# 🌍 Приветствия на 15 языках (только приветствие)
+# 🌍 Приветствия на 15 языках
 GREETINGS = [
     ("🇷🇺", "Привет"),
     ("🇺🇸", "Hello"),
@@ -61,7 +58,7 @@ GREETINGS = [
     ("🇹🇷", "Merhaba"),
 ]
 
-# 🇷🇺 50 умных фраз на русском (только фразы)
+# 🇷🇺 50 умных фраз на русском
 SMART_PHRASES_RU = [
     "Записывай мысли — они имеют свойство улетучиваться ✨",
     "Память изменчива, а текст — вечный 📜",
@@ -125,25 +122,31 @@ SMART_PHRASES_RU = [
     "Завтрашний ты скажет спасибо сегодняшнему за эту заметку 🙏"
 ]
 
-# Эмодзи для персонального "голоса"
-VOICE_EMOJIS = {
-    "default": ["😊", "✨", "💫", "🌟", "🌿", "🍀", "🌱", "☀️", "🌙", "🍃"],
-    "morning": ["🌅", "☀️", "☕", "🌤️", "🐦"],
-    "day": ["🌤️", "💡", "🚀", "⚡", "🌈"],
-    "evening": ["🌆", "🌙", "🕯️", "🌌", "🌠"]
+# Эмодзи для времени суток
+TIME_GREETINGS = [
+    (5, 10, "🌅", "Доброе утро"),
+    (10, 18, "☀️", "Добрый день"),
+    (18, 24, "🌙", "Добрый вечер"),
+    (0, 5, "🌙", "Доброй ночи")
+]
+
+# Эмодзи для "голоса" бота
+VOICE_MOODS = {
+    "morning": ["☕", "🌅", "🌤️", "🐦", "🌻"],
+    "day": ["🚀", "💡", "⚡", "🌈", "🎯"],
+    "evening": ["🌙", "🕯️", "🌌", "🌠", "📖"]
 }
 
 # Состояния пользователей для поиска
 user_search_state = {}
 
-# ==================== БАЗА ДАННЫХ (PostgreSQL + SQLite) ====================
+# ==================== БАЗА ДАННЫХ ====================
 
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, func, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 from contextlib import contextmanager
 
-# Создаём движок
 if DATABASE_URL.startswith("postgresql"):
     engine = create_engine(
         DATABASE_URL,
@@ -175,6 +178,7 @@ class User(Base):
     username = Column(String)
     first_name = Column(String)
     last_name = Column(String)
+    last_seen_date = Column(String, default="")  # YYYY-MM-DD
     last_active = Column(DateTime, default=func.now())
     created_at = Column(DateTime, default=func.now())
 
@@ -215,17 +219,19 @@ def get_notes(user_id: int, limit: int = 50) -> List[Dict]:
         } for n in notes]
 
 def search_notes(user_id: int, tag: str) -> List[Dict]:
-    """Исправленный поиск: ищем тег как отдельное слово в CSV"""
+    """Исправленный поиск: точное совпадение тега в CSV"""
     with get_db_session() as session:
-        # Ищем тег как отдельный элемент в CSV (через запятую)
-        notes = session.query(Note)\
-            .filter(
-                Note.user_id == user_id,
-                Note.tags.op('REGEXP')(rf'(,|^){tag}(,|$)')  # Для PostgreSQL
-            )\
-            .order_by(Note.created_at.desc())\
-            .all()
-        if not notes:  # Fallback для SQLite
+        # Для PostgreSQL используем регулярку, для SQLite — простой поиск
+        try:
+            notes = session.query(Note)\
+                .filter(
+                    Note.user_id == user_id,
+                    Note.tags.op('REGEXP')(rf'(,|^){tag}(,|$)')
+                )\
+                .order_by(Note.created_at.desc())\
+                .all()
+        except:
+            # Fallback для SQLite
             notes = session.query(Note)\
                 .filter(
                     Note.user_id == user_id,
@@ -241,7 +247,6 @@ def search_notes(user_id: int, tag: str) -> List[Dict]:
         } for n in notes]
 
 def extract_tags(text: str) -> str:
-    """Извлекает #теги из текста → 'тег1,тег2'"""
     tags = []
     words = text.split()
     for word in words:
@@ -252,38 +257,46 @@ def extract_tags(text: str) -> str:
     return ','.join(tags[:5])
 
 def get_or_create_user(user_id: int, username: str = None, first_name: str = None, last_name: str = None):
-    """Сохраняем/обновляем пользователя для персонализации"""
     with get_db_session() as session:
         user = session.query(User).filter(User.user_id == user_id).first()
+        today = datetime.now().strftime('%Y-%m-%d')
+        
         if not user:
             user = User(
                 user_id=user_id,
                 username=username,
                 first_name=first_name,
-                last_name=last_name
+                last_name=last_name,
+                last_seen_date=today
             )
             session.add(user)
+            session.flush()
+            return {
+                'user_id': user.user_id,
+                'username': user.username,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'is_new_day': True
+            }
         else:
             user.username = username
             user.first_name = first_name
             user.last_name = last_name
             user.last_active = func.now()
-        session.flush()
-        return {
-            'user_id': user.user_id,
-            'username': user.username,
-            'first_name': user.first_name,
-            'last_name': user.last_name
-        }
-
-def get_active_users(days: int = 7) -> List[int]:
-    """Получаем пользователей, активных за последние N дней"""
-    with get_db_session() as session:
-        since = datetime.now() - timedelta(days=days)
-        users = session.query(User)\
-            .filter(User.last_active >= since)\
-            .all()
-        return [user.user_id for user in users]
+            
+            # Проверяем, первый ли раз сегодня пользователь открывает бота
+            is_new_day = (user.last_seen_date != today)
+            if is_new_day:
+                user.last_seen_date = today
+            
+            session.flush()
+            return {
+                'user_id': user.user_id,
+                'username': user.username,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'is_new_day': is_new_day
+            }
 
 # ==================== ЗАЩИТА ПОДПИСКИ ====================
 
@@ -322,13 +335,11 @@ async def check_sub(callback):
 # ==================== КЛАВИАТУРЫ ====================
 
 def get_main_keyboard() -> InlineKeyboardMarkup:
-    """Минималистичная клавиатура — только поиск"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Поиск по тегам", callback_data="search")]
     ])
 
 def get_search_cancel_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура отмены поиска"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Отменить поиск", callback_data="cancel_search")]
     ])
@@ -341,7 +352,7 @@ async def start_handler(message: Message):
         await send_subscription_required(message)
         return
     
-    # Сохраняем пользователя для персонализации
+    # Получаем/создаём пользователя
     user = get_or_create_user(
         message.from_user.id,
         message.from_user.username,
@@ -349,65 +360,75 @@ async def start_handler(message: Message):
         message.from_user.last_name
     )
     
-    # 🌍 Приветствие на случайном языке
-    flag, greeting_word = random.choice(GREETINGS)
-    mood = random.choice(VOICE_EMOJIS["default"])
+    # Определяем время суток по Минску (UTC+3)
+    hour = datetime.now().hour
+    time_greeting = "Доброе утро"
+    time_emoji = "🌅"
+    for start, end, emoji, greeting in TIME_GREETINGS:
+        if start <= hour < end:
+            time_greeting = greeting
+            time_emoji = emoji
+            break
     
     # Формируем имя для обращения
     name = user['first_name'] or user['username'] or "друг"
-    name = name.split()[0]  # Только первое имя
+    name = name.split()[0]
     
-    # Отправляем приветствие
-    await message.answer(
-        f"{mood} <b>{greeting_word}, {name}!</b> {flag}",
-        reply_markup=get_main_keyboard()
-    )
-    
-    # Пауза 0.7 секунды для естественности
-    await asyncio.sleep(0.7)
-    
-    # 🇷🇺 Умная фраза на русском (отдельное сообщение!)
-    smart_phrase = random.choice(SMART_PHRASES_RU)
-    await message.answer(
-        f"<i>{smart_phrase}</i>\n\n"
-        "📝 Просто напиши заметку — она сохранится.\n"
-        "🏷️ Используй #теги для поиска (#работа #идея)",
-        reply_markup=get_main_keyboard()
-    )
+    # 🌅 УТРЕННЕЕ ПРИВЕТСТВИЕ ПРИ ПЕРВОМ /start В ДЕНЬ
+    if user['is_new_day']:
+        await message.answer(
+            f"{time_emoji} <b>{time_greeting}, {name}!</b>\n\n"
+            f"<i>{random.choice(SMART_PHRASES_RU)}</i>",
+            reply_markup=get_main_keyboard()
+        )
+    else:
+        # Обычное приветствие
+        flag, greeting_word = random.choice(GREETINGS)
+        mood = random.choice(VOICE_MOODS["morning"] if hour < 12 else VOICE_MOODS["day"] if hour < 18 else VOICE_MOODS["evening"])
+        
+        await message.answer(
+            f"{mood} <b>{greeting_word}, {name}!</b> {flag}",
+            reply_markup=get_main_keyboard()
+        )
+        
+        # Пауза для естественности
+        await asyncio.sleep(0.7)
+        
+        await message.answer(
+            f"<i>{random.choice(SMART_PHRASES_RU)}</i>\n\n"
+            "📝 Просто напиши заметку — она сохранится.\n"
+            "🏷️ Используй #теги (#работа #идея)",
+            reply_markup=get_main_keyboard()
+        )
 
 @dp.message(Command("help"))
 async def help_handler(message: Message):
-    """Справка по команде /help (без кнопки в интерфейсе)"""
     await message.answer(
-        "💡 <b>Как пользоваться ботом</b>\n\n"
+        "💡 <b>Как пользоваться</b>\n\n"
         "✨ <b>Сохранение:</b>\n"
-        "Напиши или перешли сообщение — оно сохранится автоматически.\n\n"
+        "Напиши или перешли сообщение — сохранится автоматически.\n\n"
         "🏷️ <b>Теги:</b>\n"
-        "Добавляй #теги в текст:\n"
-        "<code>Купить молоко #список #важное</code>\n\n"
+        "Добавляй #теги: <code>Купить молоко #список</code>\n\n"
         "🔍 <b>Поиск:</b>\n"
-        "Нажми «🔍 Поиск» → введи тег без #:\n"
-        "<code>работа</code> → покажет все заметки с #работа",
+        "Нажми «🔍 Поиск» → введи тег без # (<code>список</code>)",
         reply_markup=get_main_keyboard()
     )
 
-# ==================== ПОИСК ПО ТЕГАМ (ИСПРАВЛЕННЫЙ) ====================
+# ==================== ПОИСК ПО ТЕГАМ ====================
 
 @dp.callback_query(F.data == "search")
 async def search_start(callback):
-    """Начало поиска — устанавливаем состояние"""
     user_search_state[callback.from_user.id] = "searching"
     await callback.message.edit_text(
         "🔍 <b>Поиск по тегам</b>\n\n"
-        "Введите тег <b>без символа #</b>:\n"
-        "Например: <code>работа</code> или <code>идея</code>",
+        "Введите тег <b>без #</b>:\n"
+        "Например: <code>работа</code>",
         reply_markup=get_search_cancel_keyboard()
     )
     await callback.answer()
 
 @dp.callback_query(F.data == "cancel_search")
 async def cancel_search(callback):
-    """Отмена поиска"""
     user_id = callback.from_user.id
     if user_id in user_search_state:
         del user_search_state[user_id]
@@ -415,15 +436,12 @@ async def cancel_search(callback):
 
 @dp.message()
 async def message_handler(message: Message):
-    """Универсальный обработчик: сохранение заметок + поиск"""
     user_id = message.from_user.id
     
-    # Проверка подписки
     if not await is_subscribed(user_id):
         await send_subscription_required(message)
         return
     
-    # Сохраняем активность пользователя
     get_or_create_user(
         user_id,
         message.from_user.username,
@@ -437,13 +455,9 @@ async def message_handler(message: Message):
         
         tag = message.text.strip().lower().lstrip('#')
         if not tag:
-            await message.answer(
-                "⚠️ Введите тег без #",
-                reply_markup=get_search_cancel_keyboard()
-            )
+            await message.answer("⚠️ Введите тег без #", reply_markup=get_search_cancel_keyboard())
             return
         
-        # ИСПРАВЛЕНО: поиск по точному совпадению тега в CSV
         results = search_notes(user_id, tag)
         
         if not results:
@@ -453,7 +467,6 @@ async def message_handler(message: Message):
             )
             return
         
-        # Формируем результаты
         text = f"✅ Найдено {len(results)} заметок с тегом <code>#{tag}</code>:\n\n"
         for i, note in enumerate(results[:10], 1):
             preview = note['content'][:70] + "..." if len(note['content']) > 70 else note['content']
@@ -466,7 +479,7 @@ async def message_handler(message: Message):
         await message.answer(text, reply_markup=get_main_keyboard())
         return
     
-    # Обычное сохранение заметки
+    # Сохранение заметки
     content = message.text or message.caption or ""
     if message.photo:
         content = (message.caption or "") + "\n[🖼️ Фото]"
@@ -481,21 +494,20 @@ async def message_handler(message: Message):
         await message.reply("💭 Пустые сообщения не сохраняю. Напиши что-нибудь!")
         return
     
-    # Извлекаем теги и сохраняем
     tags = extract_tags(content)
     note_id = add_note(user_id, content, tags)
     
-    # Персональный ответ с "голосом" бота
+    # Персональный ответ с "голосом"
     hour = datetime.now().hour
-    if 5 <= hour < 12:
-        mood = random.choice(VOICE_EMOJIS["morning"])
-        voice_phrase = "☕ Утренняя заметка сохранена!"
-    elif 12 <= hour < 18:
-        mood = random.choice(VOICE_EMOJIS["day"])
-        voice_phrase = "🚀 Заметка в деле сохранена!"
+    if hour < 12:
+        mood = random.choice(VOICE_MOODS["morning"])
+        voice_phrase = "☕ Заметка сохранена!"
+    elif hour < 18:
+        mood = random.choice(VOICE_MOODS["day"])
+        voice_phrase = "🚀 Заметка в деле!"
     else:
-        mood = random.choice(VOICE_EMOJIS["evening"])
-        voice_phrase = "🌙 Вечерняя мысль надёжно спрятана!"
+        mood = random.choice(VOICE_MOODS["evening"])
+        voice_phrase = "🌙 Мысль надёжно спрятана!"
     
     tag_text = f"\n🏷️ Теги: #{' #'.join(tags.split(','))}" if tags else ""
     
@@ -503,46 +515,6 @@ async def message_handler(message: Message):
         f"{mood} {voice_phrase} (#{note_id}){tag_text}",
         reply_markup=get_main_keyboard()
     )
-
-# ==================== ЕЖЕДНЕВНОЕ ПРИВЕТСТВИЕ В 9:00 ====================
-
-async def send_morning_greeting():
-    """Отправляем утреннее приветствие всем активным пользователям"""
-    logger.info("🌅 Отправка утренних приветствий...")
-    
-    # Получаем активных пользователей (за последние 7 дней)
-    active_users = get_active_users(days=7)
-    logger.info(f"📨 Найдено {len(active_users)} активных пользователей")
-    
-    # Умная фраза дня
-    daily_phrase = random.choice(SMART_PHRASES_RU)
-    
-    success_count = 0
-    for user_id in active_users:
-        try:
-            # Получаем данные пользователя для персонализации
-            with get_db_session() as session:
-                user = session.query(User).filter(User.user_id == user_id).first()
-                if not user:
-                    continue
-                
-                name = user.first_name or user.username or "друг"
-                name = name.split()[0]
-            
-            # Отправляем приветствие
-            await bot.send_message(
-                chat_id=user_id,
-                text=f"🌅 Доброе утро, {name}!\n\n<i>{daily_phrase}</i>\n\nЧто сегодня запишем?",
-                reply_markup=get_main_keyboard()
-            )
-            success_count += 1
-            await asyncio.sleep(0.1)  # Защита от лимитов Telegram
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Не удалось отправить приветствие пользователю {user_id}: {e}")
-            continue
-    
-    logger.info(f"✅ Отправлено {success_count} утренних приветствий")
 
 # ==================== ЗАПУСК ====================
 
@@ -552,7 +524,6 @@ async def main():
     logger.info(f"🔒 Подписка: {REQUIRED_CHANNEL}")
     logger.info(f"💾 База данных: {DATABASE_URL}")
     
-    # Тест подключения к БД
     try:
         test_id = add_note(123456, "Тест", "тест")
         logger.info(f"✅ База данных работает (тестовая заметка ID: {test_id})")
@@ -560,28 +531,13 @@ async def main():
         logger.error(f"❌ Ошибка БД: {e}")
         sys.exit(1)
     
-    # Настройка ежедневного приветствия (будние дни в 9:00 по Минску UTC+3)
-    scheduler.add_job(
-        send_morning_greeting,
-        CronTrigger(day_of_week='mon-fri', hour=9, minute=0, timezone='Europe/Minsk'),
-        id='morning_greeting',
-        replace_existing=True
-    )
-    scheduler.start()
-    logger.info("⏰ Планировщик запущен: ежедневные приветствия в 9:00 по будням")
-    
-    # Запуск бота
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("👋 Бот остановлен пользователем")
-        if scheduler.running:
-            scheduler.shutdown()
+        logger.info("👋 Бот остановлен")
     except Exception as e:
         logger.exception(f"❌ Критическая ошибка: {e}")
-        if scheduler.running:
-            scheduler.shutdown()
         sys.exit(1)
