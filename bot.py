@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 JARVIS Lite — Ультра-минималистичные заметки
+✅ Постоянная клавиатура внизу чата (как в заметках Viber)
 ✅ Без тегов — просто текст
 ✅ При каждом сообщении: «✅ Сохранено!»
 ✅ Простой поиск по тексту заметок
-✅ Кнопки вынесены в keyboards.py
 🔒 Обязательная подписка на @bot_pro_bot_you
 """
 import os
@@ -14,7 +14,7 @@ import asyncio
 from datetime import datetime
 from typing import List, Dict
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -82,7 +82,7 @@ SMART_PHRASES_RU = [
 ]
 
 # Состояния пользователей для поиска
-user_search_state = {}
+user_search_state = set()  # Используем множество для простоты
 
 # ==================== БАЗА ДАННЫХ ====================
 
@@ -186,7 +186,7 @@ def get_or_create_user(user_id: int, username: str = None, first_name: str = Non
 
 # ==================== ИМПОРТ КЛАВИАТУР ====================
 
-from keyboards import get_main_keyboard, get_search_cancel_keyboard
+from keyboards import get_main_keyboard, get_search_keyboard
 
 # ==================== ЗАЩИТА ПОДПИСКИ ====================
 
@@ -204,20 +204,13 @@ async def send_subscription_required(message: Message):
         f"🔒 <b>Подписка обязательна</b>\n\n"
         f"Подпишитесь на канал, чтобы пользоваться ботом:\n"
         f"<a href='https://t.me/{REQUIRED_CHANNEL.lstrip('@')}'>@bot_pro_bot_you</a>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📺 Перейти в канал", url="https://t.me/bot_pro_bot_you")],
-            [InlineKeyboardButton(text="🔄 Проверить подписку", callback_data="check_sub")]
-        ]),
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="📺 Перейти в канал")]],
+            resize_keyboard=True,
+            one_time_keyboard=False
+        ),
         disable_web_page_preview=True
     )
-
-@dp.callback_query(F.data == "check_sub")
-async def check_sub(callback: CallbackQuery):
-    if await is_subscribed(callback.from_user.id):
-        await start_handler(callback.message)
-        await callback.answer("✅ Доступ открыт!", show_alert=True)
-    else:
-        await callback.answer("❌ Подписка не найдена. Подпишитесь и попробуйте снова.", show_alert=True)
 
 # ==================== ОБРАБОТЧИКИ ====================
 
@@ -242,38 +235,57 @@ async def start_handler(message: Message):
         f"👋 <b>{greeting_word}, {name}!</b> {flag}\n\n"
         f"<i>{smart_phrase}</i>\n\n"
         "📝 Просто пиши — я сохраню.\n"
-        "🔍 Ищи любые заметки по словам.",
+        "🔍 Нажми кнопку внизу, чтобы найти заметку.",
         reply_markup=get_main_keyboard()
     )
 
-@dp.callback_query(F.data == "start_menu")
-async def start_menu(callback: CallbackQuery):
-    await callback.message.edit_text(
+@dp.message(F.text == "🚀 Старт")
+async def start_menu(message: Message):
+    if not await is_subscribed(message.from_user.id):
+        await send_subscription_required(message)
+        return
+    
+    await message.answer(
         "✨ <b>JARVIS Lite</b>\n\n"
         "Простые заметки с душой:\n"
-        "• Пиши — сохраняю автоматически\n"
-        "• Ищи по словам в один клик\n\n"
+        "• Пиши — сохраняю автоматически ✅\n"
+        "• Ищи по словам в один клик 🔍\n\n"
         "Начни прямо сейчас — напиши свою первую заметку!",
         reply_markup=get_main_keyboard()
     )
-    await callback.answer()
 
-@dp.callback_query(F.data == "search")
-async def search_start(callback: CallbackQuery):
-    user_search_state[callback.from_user.id] = "searching"
-    await callback.message.edit_text(
+@dp.message(F.text == "🔍 Поиск")
+async def search_start(message: Message):
+    if not await is_subscribed(message.from_user.id):
+        await send_subscription_required(message)
+        return
+    
+    user_search_state.add(message.from_user.id)
+    await message.answer(
         "🔍 <b>Поиск</b>\n\n"
-        "Введите слово или фразу:",
-        reply_markup=get_search_cancel_keyboard()
+        "Введите слово или фразу для поиска:",
+        reply_markup=get_search_keyboard()
     )
-    await callback.answer()
 
-@dp.callback_query(F.data == "cancel_search")
-async def cancel_search(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    if user_id in user_search_state:
-        del user_search_state[user_id]
-    await start_menu(callback)
+@dp.message(F.text == "❌ Отменить поиск")
+async def cancel_search(message: Message):
+    if message.from_user.id in user_search_state:
+        user_search_state.remove(message.from_user.id)
+    await message.answer("Поиск отменён", reply_markup=get_main_keyboard())
+
+@dp.message(Command("help"))
+async def help_handler(message: Message):
+    await message.answer(
+        "💡 <b>Как пользоваться</b>\n\n"
+        "✨ <b>Сохранение:</b>\n"
+        "Просто напиши или перешли сообщение — я сохраню его.\n"
+        "Ответ: «✅ Сохранено!»\n\n"
+        "🔍 <b>Поиск:</b>\n"
+        "1. Нажми «🔍 Поиск» внизу экрана\n"
+        "2. Введи слово или фразу\n"
+        "3. Я покажу все подходящие заметки",
+        reply_markup=get_main_keyboard()
+    )
 
 @dp.message()
 async def message_handler(message: Message):
@@ -291,14 +303,20 @@ async def message_handler(message: Message):
     )
     
     # Режим поиска
-    if user_id in user_search_state and user_search_state[user_id] == "searching":
-        del user_search_state[user_id]
-        
+    if user_id in user_search_state:
         query = message.text.strip()
-        if not query:
-            await message.answer("⚠️ Введите текст для поиска", reply_markup=get_search_cancel_keyboard())
+        
+        # Проверка на кнопку отмены (на случай если пользователь написал текстом)
+        if query == "❌ Отменить поиск":
+            user_search_state.discard(user_id)
+            await message.answer("Поиск отменён", reply_markup=get_main_keyboard())
             return
         
+        if not query:
+            await message.answer("⚠️ Введите текст для поиска", reply_markup=get_search_keyboard())
+            return
+        
+        user_search_state.discard(user_id)
         results = search_notes(user_id, query)
         
         if not results:
@@ -336,13 +354,13 @@ async def message_handler(message: Message):
     
     add_note(user_id, content)
     
-    # ✅ Мгновенное подтверждение БЕЗ лишнего текста
+    # ✅ Мгновенное подтверждение
     await message.reply("✅ Сохранено!", reply_markup=get_main_keyboard())
 
 # ==================== ЗАПУСК ====================
 
 async def main():
-    logger.info("🚀 Запуск JARVIS Lite (ультра-минимализм)")
+    logger.info("🚀 Запуск JARVIS Lite (постоянная клавиатура внизу)")
     logger.info(f"🤖 Бот: @{(await bot.get_me()).username}")
     logger.info(f"🔒 Подписка: {REQUIRED_CHANNEL}")
     logger.info(f"💾 База данных: {DATABASE_URL}")
