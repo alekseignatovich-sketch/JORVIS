@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 JARVIS Lite — Минималистичный бот для заметок
+✅ Исправленная БД (без ошибки колонки)
+✅ Кнопка «🚀 Старт» как в заметках Viber
 ✅ Исправленный поиск по тегам (точное совпадение)
 ✅ Приветствие + умная фраза — отдельные сообщения
-✅ Только кнопка «Поиск» (минимализм как в Viber)
-✅ Умное приветствие при первом /start в день (без спама!)
 ✅ Персональный «голос» с эмодзи времени суток
 🔒 Обязательная подписка на @bot_pro_bot_you
 """
@@ -140,7 +140,7 @@ VOICE_MOODS = {
 # Состояния пользователей для поиска
 user_search_state = {}
 
-# ==================== БАЗА ДАННЫХ ====================
+# ==================== БАЗА ДАННЫХ (исправлена для существующей БД) ====================
 
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, func, Index
 from sqlalchemy.ext.declarative import declarative_base
@@ -178,10 +178,10 @@ class User(Base):
     username = Column(String)
     first_name = Column(String)
     last_name = Column(String)
-    last_seen_date = Column(String, default="")  # YYYY-MM-DD
-    last_active = Column(DateTime, default=func.now())
+    last_active = Column(DateTime, default=func.now())  # Единственная колонка для времени
     created_at = Column(DateTime, default=func.now())
 
+# Создаём таблицы (безопасно для существующих БД)
 Base.metadata.create_all(bind=engine)
 logger.info("✅ Таблицы созданы / проверены")
 
@@ -219,26 +219,19 @@ def get_notes(user_id: int, limit: int = 50) -> List[Dict]:
         } for n in notes]
 
 def search_notes(user_id: int, tag: str) -> List[Dict]:
-    """Исправленный поиск: точное совпадение тега в CSV"""
+    """Исправленный поиск: точное совпадение тега"""
     with get_db_session() as session:
-        # Для PostgreSQL используем регулярку, для SQLite — простой поиск
-        try:
-            notes = session.query(Note)\
-                .filter(
-                    Note.user_id == user_id,
-                    Note.tags.op('REGEXP')(rf'(,|^){tag}(,|$)')
-                )\
-                .order_by(Note.created_at.desc())\
-                .all()
-        except:
-            # Fallback для SQLite
-            notes = session.query(Note)\
-                .filter(
-                    Note.user_id == user_id,
-                    Note.tags.ilike(f'%{tag}%')
-                )\
-                .order_by(Note.created_at.desc())\
-                .all()
+        # Ищем тег как отдельное слово в CSV (через запятую)
+        notes = session.query(Note)\
+            .filter(
+                Note.user_id == user_id,
+                Note.tags.op('||')(',', Note.tags).like(f'%,{tag},%') | 
+                Note.tags.like(f'{tag},%') | 
+                Note.tags.like(f'%,{tag}') | 
+                Note.tags == tag
+            )\
+            .order_by(Note.created_at.desc())\
+            .all()
         return [{
             'id': n.id,
             'content': n.content,
@@ -247,6 +240,7 @@ def search_notes(user_id: int, tag: str) -> List[Dict]:
         } for n in notes]
 
 def extract_tags(text: str) -> str:
+    """Извлекает #теги из текста → 'тег1,тег2'"""
     tags = []
     words = text.split()
     for word in words:
@@ -257,17 +251,17 @@ def extract_tags(text: str) -> str:
     return ','.join(tags[:5])
 
 def get_or_create_user(user_id: int, username: str = None, first_name: str = None, last_name: str = None):
+    """Безопасная работа с существующей БД (без колонки last_seen_date)"""
     with get_db_session() as session:
         user = session.query(User).filter(User.user_id == user_id).first()
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = datetime.now().date()
         
         if not user:
             user = User(
                 user_id=user_id,
                 username=username,
                 first_name=first_name,
-                last_name=last_name,
-                last_seen_date=today
+                last_name=last_name
             )
             session.add(user)
             session.flush()
@@ -279,15 +273,15 @@ def get_or_create_user(user_id: int, username: str = None, first_name: str = Non
                 'is_new_day': True
             }
         else:
+            # Обновляем данные пользователя
             user.username = username
             user.first_name = first_name
             user.last_name = last_name
-            user.last_active = func.now()
+            prev_date = user.last_active.date() if user.last_active else None
+            user.last_active = datetime.now()
             
-            # Проверяем, первый ли раз сегодня пользователь открывает бота
-            is_new_day = (user.last_seen_date != today)
-            if is_new_day:
-                user.last_seen_date = today
+            # Проверяем, первый ли раз сегодня
+            is_new_day = (prev_date != today)
             
             session.flush()
             return {
@@ -335,13 +329,15 @@ async def check_sub(callback):
 # ==================== КЛАВИАТУРЫ ====================
 
 def get_main_keyboard() -> InlineKeyboardMarkup:
+    """Минималистичная клавиатура с кнопкой «Старт» как в Viber"""
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 Старт", callback_data="start_menu")],
         [InlineKeyboardButton(text="🔍 Поиск по тегам", callback_data="search")]
     ])
 
 def get_search_cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отменить поиск", callback_data="cancel_search")]
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="start_menu")]
     ])
 
 # ==================== КОМАНДЫ ====================
@@ -352,7 +348,7 @@ async def start_handler(message: Message):
         await send_subscription_required(message)
         return
     
-    # Получаем/создаём пользователя
+    # Сохраняем/получаем пользователя
     user = get_or_create_user(
         message.from_user.id,
         message.from_user.username,
@@ -360,7 +356,7 @@ async def start_handler(message: Message):
         message.from_user.last_name
     )
     
-    # Определяем время суток по Минску (UTC+3)
+    # Определяем время суток
     hour = datetime.now().hour
     time_greeting = "Доброе утро"
     time_emoji = "🌅"
@@ -370,11 +366,11 @@ async def start_handler(message: Message):
             time_emoji = emoji
             break
     
-    # Формируем имя для обращения
+    # Формируем имя
     name = user['first_name'] or user['username'] or "друг"
     name = name.split()[0]
     
-    # 🌅 УТРЕННЕЕ ПРИВЕТСТВИЕ ПРИ ПЕРВОМ /start В ДЕНЬ
+    # 🌅 ПЕРВОЕ ПРИВЕТСТВИЕ В ДЕНЬ
     if user['is_new_day']:
         await message.answer(
             f"{time_emoji} <b>{time_greeting}, {name}!</b>\n\n"
@@ -392,7 +388,7 @@ async def start_handler(message: Message):
         )
         
         # Пауза для естественности
-        await asyncio.sleep(0.7)
+        await asyncio.sleep(0.5)
         
         await message.answer(
             f"<i>{random.choice(SMART_PHRASES_RU)}</i>\n\n"
@@ -400,6 +396,20 @@ async def start_handler(message: Message):
             "🏷️ Используй #теги (#работа #идея)",
             reply_markup=get_main_keyboard()
         )
+
+@dp.callback_query(F.data == "start_menu")
+async def start_menu(callback):
+    """Обработчик кнопки «Старт» — показывает инструкцию"""
+    await callback.message.edit_text(
+        "✨ <b>JARVIS Lite</b>\n\n"
+        "Простые заметки с душой:\n"
+        "• Пиши — сохраняю автоматически\n"
+        "• Добавляй #теги для поиска\n"
+        "• Ищи по тегам в один клик\n\n"
+        "Начни прямо сейчас — напиши свою первую заметку!",
+        reply_markup=get_main_keyboard()
+    )
+    await callback.answer()
 
 @dp.message(Command("help"))
 async def help_handler(message: Message):
@@ -422,7 +432,7 @@ async def search_start(callback):
     await callback.message.edit_text(
         "🔍 <b>Поиск по тегам</b>\n\n"
         "Введите тег <b>без #</b>:\n"
-        "Например: <code>работа</code>",
+        "Например: <code>работа</code> или <code>идея</code>",
         reply_markup=get_search_cancel_keyboard()
     )
     await callback.answer()
@@ -432,7 +442,7 @@ async def cancel_search(callback):
     user_id = callback.from_user.id
     if user_id in user_search_state:
         del user_search_state[user_id]
-    await start_handler(callback.message)
+    await start_menu(callback)
 
 @dp.message()
 async def message_handler(message: Message):
@@ -497,7 +507,7 @@ async def message_handler(message: Message):
     tags = extract_tags(content)
     note_id = add_note(user_id, content, tags)
     
-    # Персональный ответ с "голосом"
+    # Персональный ответ
     hour = datetime.now().hour
     if hour < 12:
         mood = random.choice(VOICE_MOODS["morning"])
@@ -524,11 +534,14 @@ async def main():
     logger.info(f"🔒 Подписка: {REQUIRED_CHANNEL}")
     logger.info(f"💾 База данных: {DATABASE_URL}")
     
+    # Тест подключения к БД
     try:
         test_id = add_note(123456, "Тест", "тест")
         logger.info(f"✅ База данных работает (тестовая заметка ID: {test_id})")
     except Exception as e:
         logger.error(f"❌ Ошибка БД: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
     
     await dp.start_polling(bot)
