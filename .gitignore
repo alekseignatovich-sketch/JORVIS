@@ -11,23 +11,18 @@ ENV/
 dist/
 build/
 
-# Environment variables
+# Environment
 .env
+.env.local
 
-# Database
+# Logs
+*.log
+
+# Database (SQLite)
 *.db
 *.sqlite
 *.sqlite3
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
 # OS
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log
