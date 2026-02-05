@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-JARVIS Lite — Минималистичный бот для заметок
-✅ Исправленная БД (без ошибки колонки)
-✅ Кнопка «🚀 Старт» как в заметках Viber
-✅ Исправленный поиск по тегам (точное совпадение)
-✅ Приветствие + умная фраза — отдельные сообщения
-✅ Персональный «голос» с эмодзи времени суток
+JARVIS Lite — Ультра-минималистичные заметки
+✅ Без тегов — просто текст
+✅ При каждом сообщении: «✅ Сохранено!»
+✅ Простой поиск по тексту заметок
+✅ Минимализм: только кнопка «🔍 Поиск»
 🔒 Обязательная подписка на @bot_pro_bot_you
 """
 import os
 import sys
 import random
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -39,7 +38,7 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# 🌍 Приветствия на 15 языках
+# 🌍 Приветствия на 15 языках (только приветствие)
 GREETINGS = [
     ("🇷🇺", "Привет"),
     ("🇺🇸", "Hello"),
@@ -58,89 +57,34 @@ GREETINGS = [
     ("🇹🇷", "Merhaba"),
 ]
 
-# 🇷🇺 50 умных фраз на русском
+# 🇷🇺 20 умных фраз на русском (только для приветствия)
 SMART_PHRASES_RU = [
     "Записывай мысли — они имеют свойство улетучиваться ✨",
     "Память изменчива, а текст — вечный 📜",
-    "Мысль, не записанная вовремя, навсегда теряется в потоке сознания 🌊",
-    "Голова для думания, бумага для записывания 🧠→📝",
-    "Не ум умен, а запись умна 💡",
-    "Мысль — это семя. Запись — это почва 🌱",
-    "Тишина рождает мысли. Запись — бессмертие 🤫",
-    "Мозг — процессор, заметки — оперативная память 💾",
-    "Идея без записи — как сон без воспоминаний 💤",
-    "Завтра ты забудешь. Я — нет 🤖",
-    "Лучшие идеи приходят тогда, когда их не ждёшь. Лови момент 🌱",
-    "Творчество — это 1% вдохновения и 99% фиксации ✍️",
-    "Вдохновение не ждёт — успевай ловить 🦋",
-    "Искра гениальности гаснет за 7 секунд. Запиши быстрее ⚡",
-    "Твори. Записывай. Повторяй 🔄",
-    "Гений — это 10% вдохновения и 90% сохранённых черновиков 🎨",
-    "Не жди музы — создавай сам и записывай мелодию 🎵",
-    "Креативность любит порядок в заметках 🎨→📋",
-    "Идея — это подарок. Запись — благодарность 🎁",
-    "Творческий хаос требует цифрового порядка 🌪️→✨",
+    "Лучшие идеи приходят тогда, когда их не ждёшь 🌱",
+    "Одна записанная идея стоит тысячи забытых 💫",
     "Сегодняшняя заметка — завтрашнее решение 🚀",
-    "Одна записанная идея стоит тысячи забытых гениальных мыслей 💫",
-    "Маленькая заметка — большой шаг к цели 🦶→🏔️",
-    "Не откладывай на потом то, что можно записать сейчас ⚡",
-    "Порядок в заметках — порядок в голове 🧠✨",
-    "Заметка сегодня = благодарность себе завтра 🙏",
-    "Цель без плана — мечта. План без записи — иллюзия 🎯",
-    "Делай. Записывай. Анализируй. Развивайся 📈",
-    "Продуктивность начинается с одной заметки ✅",
-    "Три вещи не вернуть: время, слово, упущенная идея ⏳",
-    "Идеи как птицы: поймай — иначе улетят 🕊️",
-    "Мысли текут рекой. Я строю плотины 🌊→💧",
-    "Хаос мыслей → порядок в заметках 🌪️→📋",
-    "Слова имеют вес. Записанные — вечность ⚖️",
-    "Ты — автор. Я — черновик 📖",
-    "От искры — к пламени. От заметки — к проекту 🔥",
-    "Мир в твоих мыслях. Порядок — в моих заметках 🌍",
-    "Звёзды гаснут. Записанные идеи — нет ✨",
-    "Мысль — капля. Заметки — океан 💧→🌊",
-    "Время стирает воспоминания. Текст — нет 🕰️",
     "Мозг для идей, бот для хранения 🧠→🤖",
-    "Ты думаешь — я запоминаю. Команда мечты! 🤝",
+    "Идеи как птицы: поймай — иначе улетят 🕊️",
+    "Хаос мыслей → порядок в заметках 🌪️→📋",
+    "Ты — источник идей. Я — их архив 🌊→💾",
+    "Завтра ты забудешь. Я — нет 🤖",
+    "Маленькая заметка — большой шаг к цели 🦶→🏔️",
+    "Слова имеют вес. Записанные — вечность ⚖️",
+    "От искры — к пламени. От заметки — к проекту 🔥",
+    "Время стирает воспоминания. Текст — нет 🕰️",
     "Здесь безопасно хранить даже самые безумные идеи 😈",
     "Одна заметка — один шаг к порядку в голове 🧠",
-    "Ты — источник идей. Я — их архив 🌊→💾",
-    "Не идея важна — важен момент, когда она пришла ⏳",
-    "Здесь каждая идея имеет право на жизнь ✨",
-    "Думай меньше о том, чтобы запомнить. Думай больше о том, чтобы создать 💭→🚀",
-    "Я не судья твоих мыслей. Я — их друг 🤗",
-    "Секреты надёжно спрятаны в твоих заметках 🔒",
     "Знание — сила. Записанное знание — могущество 💪",
-    "Мудрый человек записывает. Гениальный — перечитывает 📚",
-    "Прошлое учит, будущее зовёт. Настоящее — записывай 🔄",
-    "Жизнь коротка. Заметки — вечны ⏳",
-    "Не количество мыслей важно, а качество их сохранения 💎",
-    "Мудрость не в том, чтобы знать всё. А в том, чтобы знать, где найти 🗺️",
     "Каждая великая вещь начиналась с маленькой заметки 📌",
-    "Память обманчива. Текст — объективен 👁️",
     "Мысли уходят. Слова остаются. Мудрость — в записи 📜",
     "Завтрашний ты скажет спасибо сегодняшнему за эту заметку 🙏"
 ]
 
-# Эмодзи для времени суток
-TIME_GREETINGS = [
-    (5, 10, "🌅", "Доброе утро"),
-    (10, 18, "☀️", "Добрый день"),
-    (18, 24, "🌙", "Добрый вечер"),
-    (0, 5, "🌙", "Доброй ночи")
-]
-
-# Эмодзи для "голоса" бота
-VOICE_MOODS = {
-    "morning": ["☕", "🌅", "🌤️", "🐦", "🌻"],
-    "day": ["🚀", "💡", "⚡", "🌈", "🎯"],
-    "evening": ["🌙", "🕯️", "🌌", "🌠", "📖"]
-}
-
 # Состояния пользователей для поиска
 user_search_state = {}
 
-# ==================== БАЗА ДАННЫХ (исправлена для существующей БД) ====================
+# ==================== БАЗА ДАННЫХ ====================
 
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, func, Index
 from sqlalchemy.ext.declarative import declarative_base
@@ -168,9 +112,7 @@ class Note(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=False, index=True)
     content = Column(Text, nullable=False)
-    tags = Column(String, default="")
     created_at = Column(DateTime, default=func.now(), index=True)
-    __table_args__ = (Index('idx_user_tags', 'user_id', 'tags'),)
 
 class User(Base):
     __tablename__ = "users"
@@ -178,10 +120,9 @@ class User(Base):
     username = Column(String)
     first_name = Column(String)
     last_name = Column(String)
-    last_active = Column(DateTime, default=func.now())  # Единственная колонка для времени
+    last_active = Column(DateTime, default=func.now())
     created_at = Column(DateTime, default=func.now())
 
-# Создаём таблицы (безопасно для существующих БД)
 Base.metadata.create_all(bind=engine)
 logger.info("✅ Таблицы созданы / проверены")
 
@@ -197,14 +138,16 @@ def get_db_session():
     finally:
         session.close()
 
-def add_note(user_id: int, content: str, tags: str = "") -> int:
+def add_note(user_id: int, content: str) -> int:
+    """Сохранить заметку БЕЗ тегов"""
     with get_db_session() as session:
-        note = Note(user_id=user_id, content=content, tags=tags)
+        note = Note(user_id=user_id, content=content)
         session.add(note)
         session.flush()
         return note.id
 
 def get_notes(user_id: int, limit: int = 50) -> List[Dict]:
+    """Получить последние заметки"""
     with get_db_session() as session:
         notes = session.query(Note)\
             .filter(Note.user_id == user_id)\
@@ -214,48 +157,29 @@ def get_notes(user_id: int, limit: int = 50) -> List[Dict]:
         return [{
             'id': n.id,
             'content': n.content[:100] + '...' if len(n.content) > 100 else n.content,
-            'tags': n.tags.split(',') if n.tags else [],
             'created_at': n.created_at
         } for n in notes]
 
-def search_notes(user_id: int, tag: str) -> List[Dict]:
-    """Исправленный поиск: точное совпадение тега"""
+def search_notes(user_id: int, query: str) -> List[Dict]:
+    """Простой поиск по тексту заметок"""
     with get_db_session() as session:
-        # Ищем тег как отдельное слово в CSV (через запятую)
         notes = session.query(Note)\
             .filter(
                 Note.user_id == user_id,
-                Note.tags.op('||')(',', Note.tags).like(f'%,{tag},%') | 
-                Note.tags.like(f'{tag},%') | 
-                Note.tags.like(f'%,{tag}') | 
-                Note.tags == tag
+                Note.content.ilike(f'%{query}%')
             )\
             .order_by(Note.created_at.desc())\
             .all()
         return [{
             'id': n.id,
-            'content': n.content,
-            'tags': n.tags.split(',') if n.tags else [],
+            'content': n.content[:120] + '...' if len(n.content) > 120 else n.content,
             'created_at': n.created_at
         } for n in notes]
 
-def extract_tags(text: str) -> str:
-    """Извлекает #теги из текста → 'тег1,тег2'"""
-    tags = []
-    words = text.split()
-    for word in words:
-        if word.startswith('#') and len(word) > 1:
-            tag = word[1:].strip('.,!?:;').lower()
-            if tag and tag not in tags:
-                tags.append(tag)
-    return ','.join(tags[:5])
-
 def get_or_create_user(user_id: int, username: str = None, first_name: str = None, last_name: str = None):
-    """Безопасная работа с существующей БД (без колонки last_seen_date)"""
+    """Получить или создать пользователя"""
     with get_db_session() as session:
         user = session.query(User).filter(User.user_id == user_id).first()
-        today = datetime.now().date()
-        
         if not user:
             user = User(
                 user_id=user_id,
@@ -265,32 +189,14 @@ def get_or_create_user(user_id: int, username: str = None, first_name: str = Non
             )
             session.add(user)
             session.flush()
-            return {
-                'user_id': user.user_id,
-                'username': user.username,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'is_new_day': True
-            }
+            return {'user_id': user.user_id, 'first_name': user.first_name}
         else:
-            # Обновляем данные пользователя
             user.username = username
             user.first_name = first_name
             user.last_name = last_name
-            prev_date = user.last_active.date() if user.last_active else None
             user.last_active = datetime.now()
-            
-            # Проверяем, первый ли раз сегодня
-            is_new_day = (prev_date != today)
-            
             session.flush()
-            return {
-                'user_id': user.user_id,
-                'username': user.username,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'is_new_day': is_new_day
-            }
+            return {'user_id': user.user_id, 'first_name': user.first_name}
 
 # ==================== ЗАЩИТА ПОДПИСКИ ====================
 
@@ -298,11 +204,8 @@ async def is_subscribed(user_id: int) -> bool:
     try:
         member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
         return member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
-    except (TelegramBadRequest, TelegramForbiddenError) as e:
-        if "member list is inaccessible" in str(e):
-            logger.warning(f"⚠️ Канал {REQUIRED_CHANNEL} недоступен — защита отключена")
-            return True
-        return False
+    except (TelegramBadRequest, TelegramForbiddenError):
+        return True  # При ошибке канала — пропускаем (защита не критична)
     except Exception:
         return False
 
@@ -329,15 +232,14 @@ async def check_sub(callback):
 # ==================== КЛАВИАТУРЫ ====================
 
 def get_main_keyboard() -> InlineKeyboardMarkup:
-    """Минималистичная клавиатура с кнопкой «Старт» как в Viber"""
+    """Только одна кнопка — поиск (как в заметках Viber)"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚀 Старт", callback_data="start_menu")],
-        [InlineKeyboardButton(text="🔍 Поиск по тегам", callback_data="search")]
+        [InlineKeyboardButton(text="🔍 Поиск", callback_data="search")]
     ])
 
 def get_search_cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="start_menu")]
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_search")]
     ])
 
 # ==================== КОМАНДЫ ====================
@@ -348,7 +250,7 @@ async def start_handler(message: Message):
         await send_subscription_required(message)
         return
     
-    # Сохраняем/получаем пользователя
+    # Сохраняем пользователя
     user = get_or_create_user(
         message.from_user.id,
         message.from_user.username,
@@ -356,83 +258,44 @@ async def start_handler(message: Message):
         message.from_user.last_name
     )
     
-    # Определяем время суток
-    hour = datetime.now().hour
-    time_greeting = "Доброе утро"
-    time_emoji = "🌅"
-    for start, end, emoji, greeting in TIME_GREETINGS:
-        if start <= hour < end:
-            time_greeting = greeting
-            time_emoji = emoji
-            break
+    # 🌍 Приветствие на случайном языке
+    flag, greeting_word = random.choice(GREETINGS)
     
-    # Формируем имя
-    name = user['first_name'] or user['username'] or "друг"
+    # 🇷🇺 Умная фраза на русском
+    smart_phrase = random.choice(SMART_PHRASES_RU)
+    
+    # Имя для обращения
+    name = user['first_name'] or "друг"
     name = name.split()[0]
     
-    # 🌅 ПЕРВОЕ ПРИВЕТСТВИЕ В ДЕНЬ
-    if user['is_new_day']:
-        await message.answer(
-            f"{time_emoji} <b>{time_greeting}, {name}!</b>\n\n"
-            f"<i>{random.choice(SMART_PHRASES_RU)}</i>",
-            reply_markup=get_main_keyboard()
-        )
-    else:
-        # Обычное приветствие
-        flag, greeting_word = random.choice(GREETINGS)
-        mood = random.choice(VOICE_MOODS["morning"] if hour < 12 else VOICE_MOODS["day"] if hour < 18 else VOICE_MOODS["evening"])
-        
-        await message.answer(
-            f"{mood} <b>{greeting_word}, {name}!</b> {flag}",
-            reply_markup=get_main_keyboard()
-        )
-        
-        # Пауза для естественности
-        await asyncio.sleep(0.5)
-        
-        await message.answer(
-            f"<i>{random.choice(SMART_PHRASES_RU)}</i>\n\n"
-            "📝 Просто напиши заметку — она сохранится.\n"
-            "🏷️ Используй #теги (#работа #идея)",
-            reply_markup=get_main_keyboard()
-        )
-
-@dp.callback_query(F.data == "start_menu")
-async def start_menu(callback):
-    """Обработчик кнопки «Старт» — показывает инструкцию"""
-    await callback.message.edit_text(
-        "✨ <b>JARVIS Lite</b>\n\n"
-        "Простые заметки с душой:\n"
-        "• Пиши — сохраняю автоматически\n"
-        "• Добавляй #теги для поиска\n"
-        "• Ищи по тегам в один клик\n\n"
-        "Начни прямо сейчас — напиши свою первую заметку!",
+    # Отправляем приветствие
+    await message.answer(
+        f"👋 <b>{greeting_word}, {name}!</b> {flag}\n\n"
+        f"<i>{smart_phrase}</i>\n\n"
+        "📝 Просто пиши — я сохраню.\n"
+        "🔍 Нажми кнопку ниже, чтобы найти заметку.",
         reply_markup=get_main_keyboard()
     )
-    await callback.answer()
 
 @dp.message(Command("help"))
 async def help_handler(message: Message):
     await message.answer(
         "💡 <b>Как пользоваться</b>\n\n"
         "✨ <b>Сохранение:</b>\n"
-        "Напиши или перешли сообщение — сохранится автоматически.\n\n"
-        "🏷️ <b>Теги:</b>\n"
-        "Добавляй #теги: <code>Купить молоко #список</code>\n\n"
+        "Просто напиши или перешли сообщение — я сохраню его.\n\n"
         "🔍 <b>Поиск:</b>\n"
-        "Нажми «🔍 Поиск» → введи тег без # (<code>список</code>)",
+        "Нажми «🔍 Поиск» → введи слово или фразу → я покажу подходящие заметки.",
         reply_markup=get_main_keyboard()
     )
 
-# ==================== ПОИСК ПО ТЕГАМ ====================
+# ==================== ПОИСК ====================
 
 @dp.callback_query(F.data == "search")
 async def search_start(callback):
     user_search_state[callback.from_user.id] = "searching"
     await callback.message.edit_text(
-        "🔍 <b>Поиск по тегам</b>\n\n"
-        "Введите тег <b>без #</b>:\n"
-        "Например: <code>работа</code> или <code>идея</code>",
+        "🔍 <b>Поиск</b>\n\n"
+        "Введите слово или фразу для поиска:",
         reply_markup=get_search_cancel_keyboard()
     )
     await callback.answer()
@@ -442,16 +305,18 @@ async def cancel_search(callback):
     user_id = callback.from_user.id
     if user_id in user_search_state:
         del user_search_state[user_id]
-    await start_menu(callback)
+    await start_handler(callback.message)
 
 @dp.message()
 async def message_handler(message: Message):
     user_id = message.from_user.id
     
+    # Проверка подписки
     if not await is_subscribed(user_id):
         await send_subscription_required(message)
         return
     
+    # Сохраняем пользователя
     get_or_create_user(
         user_id,
         message.from_user.username,
@@ -463,25 +328,24 @@ async def message_handler(message: Message):
     if user_id in user_search_state and user_search_state[user_id] == "searching":
         del user_search_state[user_id]
         
-        tag = message.text.strip().lower().lstrip('#')
-        if not tag:
-            await message.answer("⚠️ Введите тег без #", reply_markup=get_search_cancel_keyboard())
+        query = message.text.strip()
+        if not query:
+            await message.answer("⚠️ Введите текст для поиска", reply_markup=get_search_cancel_keyboard())
             return
         
-        results = search_notes(user_id, tag)
+        results = search_notes(user_id, query)
         
         if not results:
             await message.answer(
-                f"📭 Не найдено заметок с тегом <code>#{tag}</code>",
+                f"📭 Не найдено заметок по запросу «<code>{query}</code>»",
                 reply_markup=get_main_keyboard()
             )
             return
         
-        text = f"✅ Найдено {len(results)} заметок с тегом <code>#{tag}</code>:\n\n"
+        # Формируем результаты
+        text = f"✅ Найдено {len(results)} заметок:\n\n"
         for i, note in enumerate(results[:10], 1):
-            preview = note['content'][:70] + "..." if len(note['content']) > 70 else note['content']
-            tags_display = ' '.join([f"#{t}" for t in note['tags']]) if note['tags'] else ''
-            text += f"{i}. {preview}\n{tags_display}\n\n"
+            text += f"{i}. {note['content']}\n\n"
         
         if len(results) > 10:
             text += f"...и ещё {len(results) - 10} заметок"
@@ -489,8 +353,10 @@ async def message_handler(message: Message):
         await message.answer(text, reply_markup=get_main_keyboard())
         return
     
-    # Сохранение заметки
+    # === СОХРАНЕНИЕ ЗАМЕТКИ ===
     content = message.text or message.caption or ""
+    
+    # Обработка медиа
     if message.photo:
         content = (message.caption or "") + "\n[🖼️ Фото]"
     elif message.document:
@@ -501,47 +367,29 @@ async def message_handler(message: Message):
         content = (message.caption or "") + "\n[🎤 Голосовое]"
     
     if not content.strip():
-        await message.reply("💭 Пустые сообщения не сохраняю. Напиши что-нибудь!")
+        await message.reply("💭 Пустые сообщения не сохраняю")
         return
     
-    tags = extract_tags(content)
-    note_id = add_note(user_id, content, tags)
+    # Сохраняем БЕЗ тегов
+    note_id = add_note(user_id, content)
     
-    # Персональный ответ
-    hour = datetime.now().hour
-    if hour < 12:
-        mood = random.choice(VOICE_MOODS["morning"])
-        voice_phrase = "☕ Заметка сохранена!"
-    elif hour < 18:
-        mood = random.choice(VOICE_MOODS["day"])
-        voice_phrase = "🚀 Заметка в деле!"
-    else:
-        mood = random.choice(VOICE_MOODS["evening"])
-        voice_phrase = "🌙 Мысль надёжно спрятана!"
-    
-    tag_text = f"\n🏷️ Теги: #{' #'.join(tags.split(','))}" if tags else ""
-    
-    await message.reply(
-        f"{mood} {voice_phrase} (#{note_id}){tag_text}",
-        reply_markup=get_main_keyboard()
-    )
+    # ✅ Мгновенное подтверждение
+    await message.reply("✅ Сохранено!", reply_markup=get_main_keyboard())
 
 # ==================== ЗАПУСК ====================
 
 async def main():
-    logger.info("🚀 Запуск JARVIS Lite")
+    logger.info("🚀 Запуск JARVIS Lite (ультра-минимализм)")
     logger.info(f"🤖 Бот: @{(await bot.get_me()).username}")
     logger.info(f"🔒 Подписка: {REQUIRED_CHANNEL}")
     logger.info(f"💾 База данных: {DATABASE_URL}")
     
-    # Тест подключения к БД
+    # Тест БД
     try:
-        test_id = add_note(123456, "Тест", "тест")
+        test_id = add_note(123456, "Тестовая заметка")
         logger.info(f"✅ База данных работает (тестовая заметка ID: {test_id})")
     except Exception as e:
         logger.error(f"❌ Ошибка БД: {e}")
-        import traceback
-        traceback.print_exc()
         sys.exit(1)
     
     await dp.start_polling(bot)
