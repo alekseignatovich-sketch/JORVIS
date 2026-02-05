@@ -4,7 +4,7 @@ JARVIS Lite — Ультра-минималистичные заметки
 ✅ Без тегов — просто текст
 ✅ При каждом сообщении: «✅ Сохранено!»
 ✅ Простой поиск по тексту заметок
-✅ Минимализм: только кнопка «🔍 Поиск»
+✅ Кнопки вынесены в keyboards.py
 🔒 Обязательная подписка на @bot_pro_bot_you
 """
 import os
@@ -14,7 +14,7 @@ import asyncio
 from datetime import datetime
 from typing import List, Dict
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -38,7 +38,7 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# 🌍 Приветствия на 15 языках (только приветствие)
+# 🌍 Приветствия на 15 языках
 GREETINGS = [
     ("🇷🇺", "Привет"),
     ("🇺🇸", "Hello"),
@@ -57,7 +57,7 @@ GREETINGS = [
     ("🇹🇷", "Merhaba"),
 ]
 
-# 🇷🇺 20 умных фраз на русском (только для приветствия)
+# 🇷🇺 20 умных фраз на русском
 SMART_PHRASES_RU = [
     "Записывай мысли — они имеют свойство улетучиваться ✨",
     "Память изменчива, а текст — вечный 📜",
@@ -86,7 +86,7 @@ user_search_state = {}
 
 # ==================== БАЗА ДАННЫХ ====================
 
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, func, Index
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 from contextlib import contextmanager
@@ -146,20 +146,6 @@ def add_note(user_id: int, content: str) -> int:
         session.flush()
         return note.id
 
-def get_notes(user_id: int, limit: int = 50) -> List[Dict]:
-    """Получить последние заметки"""
-    with get_db_session() as session:
-        notes = session.query(Note)\
-            .filter(Note.user_id == user_id)\
-            .order_by(Note.created_at.desc())\
-            .limit(limit)\
-            .all()
-        return [{
-            'id': n.id,
-            'content': n.content[:100] + '...' if len(n.content) > 100 else n.content,
-            'created_at': n.created_at
-        } for n in notes]
-
 def search_notes(user_id: int, query: str) -> List[Dict]:
     """Простой поиск по тексту заметок"""
     with get_db_session() as session:
@@ -198,6 +184,10 @@ def get_or_create_user(user_id: int, username: str = None, first_name: str = Non
             session.flush()
             return {'user_id': user.user_id, 'first_name': user.first_name}
 
+# ==================== ИМПОРТ КЛАВИАТУР ====================
+
+from keyboards import get_main_keyboard, get_search_cancel_keyboard
+
 # ==================== ЗАЩИТА ПОДПИСКИ ====================
 
 async def is_subscribed(user_id: int) -> bool:
@@ -205,7 +195,7 @@ async def is_subscribed(user_id: int) -> bool:
         member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
         return member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
     except (TelegramBadRequest, TelegramForbiddenError):
-        return True  # При ошибке канала — пропускаем (защита не критична)
+        return True  # При ошибке канала — пропускаем
     except Exception:
         return False
 
@@ -222,27 +212,14 @@ async def send_subscription_required(message: Message):
     )
 
 @dp.callback_query(F.data == "check_sub")
-async def check_sub(callback):
+async def check_sub(callback: CallbackQuery):
     if await is_subscribed(callback.from_user.id):
         await start_handler(callback.message)
         await callback.answer("✅ Доступ открыт!", show_alert=True)
     else:
         await callback.answer("❌ Подписка не найдена. Подпишитесь и попробуйте снова.", show_alert=True)
 
-# ==================== КЛАВИАТУРЫ ====================
-
-def get_main_keyboard() -> InlineKeyboardMarkup:
-    """Только одна кнопка — поиск (как в заметках Viber)"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Поиск", callback_data="search")]
-    ])
-
-def get_search_cancel_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_search")]
-    ])
-
-# ==================== КОМАНДЫ ====================
+# ==================== ОБРАБОТЧИКИ ====================
 
 @dp.message(Command("start"))
 async def start_handler(message: Message):
@@ -250,7 +227,6 @@ async def start_handler(message: Message):
         await send_subscription_required(message)
         return
     
-    # Сохраняем пользователя
     user = get_or_create_user(
         message.from_user.id,
         message.from_user.username,
@@ -258,65 +234,55 @@ async def start_handler(message: Message):
         message.from_user.last_name
     )
     
-    # 🌍 Приветствие на случайном языке
     flag, greeting_word = random.choice(GREETINGS)
-    
-    # 🇷🇺 Умная фраза на русском
     smart_phrase = random.choice(SMART_PHRASES_RU)
+    name = (user['first_name'] or "друг").split()[0]
     
-    # Имя для обращения
-    name = user['first_name'] or "друг"
-    name = name.split()[0]
-    
-    # Отправляем приветствие
     await message.answer(
         f"👋 <b>{greeting_word}, {name}!</b> {flag}\n\n"
         f"<i>{smart_phrase}</i>\n\n"
         "📝 Просто пиши — я сохраню.\n"
-        "🔍 Нажми кнопку ниже, чтобы найти заметку.",
+        "🔍 Ищи любые заметки по словам.",
         reply_markup=get_main_keyboard()
     )
 
-@dp.message(Command("help"))
-async def help_handler(message: Message):
-    await message.answer(
-        "💡 <b>Как пользоваться</b>\n\n"
-        "✨ <b>Сохранение:</b>\n"
-        "Просто напиши или перешли сообщение — я сохраню его.\n\n"
-        "🔍 <b>Поиск:</b>\n"
-        "Нажми «🔍 Поиск» → введи слово или фразу → я покажу подходящие заметки.",
+@dp.callback_query(F.data == "start_menu")
+async def start_menu(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "✨ <b>JARVIS Lite</b>\n\n"
+        "Простые заметки с душой:\n"
+        "• Пиши — сохраняю автоматически\n"
+        "• Ищи по словам в один клик\n\n"
+        "Начни прямо сейчас — напиши свою первую заметку!",
         reply_markup=get_main_keyboard()
     )
-
-# ==================== ПОИСК ====================
+    await callback.answer()
 
 @dp.callback_query(F.data == "search")
-async def search_start(callback):
+async def search_start(callback: CallbackQuery):
     user_search_state[callback.from_user.id] = "searching"
     await callback.message.edit_text(
         "🔍 <b>Поиск</b>\n\n"
-        "Введите слово или фразу для поиска:",
+        "Введите слово или фразу:",
         reply_markup=get_search_cancel_keyboard()
     )
     await callback.answer()
 
 @dp.callback_query(F.data == "cancel_search")
-async def cancel_search(callback):
+async def cancel_search(callback: CallbackQuery):
     user_id = callback.from_user.id
     if user_id in user_search_state:
         del user_search_state[user_id]
-    await start_handler(callback.message)
+    await start_menu(callback)
 
 @dp.message()
 async def message_handler(message: Message):
     user_id = message.from_user.id
     
-    # Проверка подписки
     if not await is_subscribed(user_id):
         await send_subscription_required(message)
         return
     
-    # Сохраняем пользователя
     get_or_create_user(
         user_id,
         message.from_user.username,
@@ -342,7 +308,6 @@ async def message_handler(message: Message):
             )
             return
         
-        # Формируем результаты
         text = f"✅ Найдено {len(results)} заметок:\n\n"
         for i, note in enumerate(results[:10], 1):
             text += f"{i}. {note['content']}\n\n"
@@ -356,7 +321,6 @@ async def message_handler(message: Message):
     # === СОХРАНЕНИЕ ЗАМЕТКИ ===
     content = message.text or message.caption or ""
     
-    # Обработка медиа
     if message.photo:
         content = (message.caption or "") + "\n[🖼️ Фото]"
     elif message.document:
@@ -370,10 +334,9 @@ async def message_handler(message: Message):
         await message.reply("💭 Пустые сообщения не сохраняю")
         return
     
-    # Сохраняем БЕЗ тегов
-    note_id = add_note(user_id, content)
+    add_note(user_id, content)
     
-    # ✅ Мгновенное подтверждение
+    # ✅ Мгновенное подтверждение БЕЗ лишнего текста
     await message.reply("✅ Сохранено!", reply_markup=get_main_keyboard())
 
 # ==================== ЗАПУСК ====================
@@ -384,9 +347,8 @@ async def main():
     logger.info(f"🔒 Подписка: {REQUIRED_CHANNEL}")
     logger.info(f"💾 База данных: {DATABASE_URL}")
     
-    # Тест БД
     try:
-        test_id = add_note(123456, "Тестовая заметка")
+        test_id = add_note(123456, "Тест")
         logger.info(f"✅ База данных работает (тестовая заметка ID: {test_id})")
     except Exception as e:
         logger.error(f"❌ Ошибка БД: {e}")
