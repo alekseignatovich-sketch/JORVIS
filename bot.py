@@ -1,353 +1,342 @@
 #!/usr/bin/env python3
 """
-JARVIS — Telegram Personal Assistant Bot
-MVP Version 1.2 — С защитой от ошибок подписки
+JARVIS Lite — Минималистичный бот для заметок
+Приветствие: случайный язык | Умная фраза: только русский
 """
-import sys
 import os
+import sys
+import random
 import asyncio
 from datetime import datetime
-from aiogram import Bot, Dispatcher
-from aiogram.filters import Command, BaseFilter
-from aiogram.types import Message, CallbackQuery
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from loguru import logger
 from dotenv import load_dotenv
 
-# 🔑 Добавляем корень проекта в PYTHONPATH
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
-# Загрузка .env
-if os.path.exists(".env"):
-    load_dotenv()
-
 # Настройка логирования
 logger.remove()
-logger.add(
-    sys.stdout,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>",
-    level="INFO"
-)
+logger.add(sys.stdout, format="<green>{time:HH:mm:ss}</green> | <level>{message}</level>", level="INFO")
 
-# Получаем канал из переменных окружения
-REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@bot_pro_bot_you")
-CHANNEL_ACCESSIBLE = True  # Флаг: доступен ли канал для проверки
-logger.info(f"🔒 Требуемый канал для подписки: {REQUIRED_CHANNEL}")
-
-# Импорты из корня проекта
-try:
-    from database import db
-    logger.info("✅ Модуль 'database' успешно импортирован")
-except ImportError as e:
-    logger.error(f"❌ Ошибка импорта 'database': {e}")
-    sys.exit(1)
-
-try:
-    from keyboards import get_main_menu, get_back_button, get_subscription_keyboard
-    from handlers.bookmarks import router as bookmarks_router, save_bookmark_simple
-    from handlers.reminders import router as reminders_router, show_reminders_simple
-    from handlers.notes import router as notes_router, show_notes_simple
-    from handlers.settings import router as settings_router
-    logger.info("✅ Все модули успешно импортированы")
-except ImportError as e:
-    logger.error(f"❌ Ошибка импорта модулей: {e}")
-    sys.exit(1)
-
-# Инициализация бота
+# Загрузка переменных
+load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@bot_pro_bot_you")
 if not BOT_TOKEN:
-    logger.error("❌ BOT_TOKEN не найден!")
+    logger.error("❌ BOT_TOKEN не задан!")
     sys.exit(1)
 
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(storage=MemoryStorage())
+dp = Dispatcher()
 
-# ==================== ФИЛЬТР ПОДПИСКИ (с защитой от ошибок) ====================
+# 🌍 Приветствия на 15 языках
+GREETINGS = [
+    ("🇷🇺", "Привет"),
+    ("🇺🇸", "Hello"),
+    ("🇪🇸", "¡Hola"),
+    ("🇫🇷", "Bonjour"),
+    ("🇩🇪", "Hallo"),
+    ("🇮🇹", "Ciao"),
+    ("🇵🇹", "Olá"),
+    ("🇳🇱", "Hallo"),
+    ("🇸🇪", "Hej"),
+    ("🇯🇵", "こんにちは"),
+    ("🇨🇳", "你好"),
+    ("🇰🇷", "안녕하세요"),
+    ("🇮🇳", "नमस्ते"),
+    ("🇦🇪", "مرحباً"),
+    ("🇹🇷", "Merhaba"),
+]
 
-class IsSubscriberFilter(BaseFilter):
-    """Фильтр: пользователь подписан на канал (с обработкой ошибок)"""
-    async def __call__(self, message: Message, bot: Bot) -> bool:
-        global CHANNEL_ACCESSIBLE
-        
-        # Если канал недоступен — пропускаем проверку (бот работает без защиты)
-        if not CHANNEL_ACCESSIBLE:
-            logger.warning("⚠️ Канал недоступен для проверки — пропускаем защиту подпиской")
+# 🇷🇺 Умные фразы ТОЛЬКО на русском (20 вариантов)
+SMART_PHRASES_RU = [
+    "Записывай мысли — они имеют свойство улетучиваться ✨",
+    "Лучшие идеи приходят тогда, когда их не ждёшь. Лови момент 🌱",
+    "Память изменчива, а текст — вечный 📜",
+    "Одна записанная идея стоит тысячи забытых гениальных мыслей 💫",
+    "Творчество — это 1% вдохновения и 99% фиксации ✍️",
+    "Сегодняшняя заметка — завтрашнее решение 🚀",
+    "Мозг для идей, бот для хранения 🧠→🤖",
+    "Не идея важна — важен момент, когда она пришла ⏳",
+    "Хаос мыслей → порядок в заметках 🌪️→📋",
+    "Ты — источник идей. Я — их архив 🌊→💾",
+    "Заметка сегодня = благодарность себе завтра 🙏",
+    "Идеи как птицы: поймай — иначе улетят 🕊️",
+    "Тише едешь — дальше будешь. Тише думаешь — глубже запишешь 🐢",
+    "Маленькая заметка — большой шаг к цели 🦶→🏔️",
+    "Слова имеют вес. Записанные — вечность ⚖️",
+    "Твори. Записывай. Повторяй 🔄",
+    "Вдохновение не ждёт — успевай ловить 🦋",
+    "Одна заметка — один шаг к порядку в голове 🧠",
+    "Здесь безопасно хранить даже самые безумные идеи 😈",
+    "Завтра ты забудешь. Я — нет 🤖"
+]
+
+# Эмодзи настроения
+MOOD_EMOJIS = ["😊", "✨", "💫", "🌟", "🌿", "🍀", "🌱", "☀️", "🌙", "🍃"]
+
+# ==================== БАЗА ДАННЫХ ====================
+import sqlite3
+from contextlib import contextmanager
+
+DB_PATH = "jarvis.db"
+
+@contextmanager
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+def init_db():
+    with get_db() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                tags TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_user ON notes(user_id)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_tags ON notes(tags)')
+
+def add_note(user_id: int, content: str, tags: str = "") -> int:
+    with get_db() as conn:
+        cursor = conn.execute(
+            'INSERT INTO notes (user_id, content, tags) VALUES (?, ?, ?)',
+            (user_id, content, tags)
+        )
+        return cursor.lastrowid
+
+def get_notes(user_id: int, limit: int = 50):
+    with get_db() as conn:
+        cursor = conn.execute(
+            'SELECT * FROM notes WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
+            (user_id, limit)
+        )
+        return cursor.fetchall()
+
+def search_notes(user_id: int, tag: str):
+    with get_db() as conn:
+        cursor = conn.execute(
+            'SELECT * FROM notes WHERE user_id = ? AND tags LIKE ? ORDER BY created_at DESC',
+            (user_id, f'%{tag}%')
+        )
+        return cursor.fetchall()
+
+def extract_tags(text: str) -> str:
+    """Извлекает #теги из текста → 'тег1,тег2'"""
+    tags = []
+    words = text.split()
+    for word in words:
+        if word.startswith('#') and len(word) > 1:
+            tag = word[1:].strip('.,!?:;').lower()
+            if tag and tag not in tags:
+                tags.append(tag)
+    return ','.join(tags[:5])
+
+# Инициализация БД при старте
+init_db()
+
+# ==================== ЗАЩИТА ПОДПИСКИ ====================
+
+async def is_subscribed(user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
+        return member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
+    except (TelegramBadRequest, TelegramForbiddenError) as e:
+        if "member list is inaccessible" in str(e):
+            logger.warning(f"⚠️ Канал {REQUIRED_CHANNEL} недоступен — защита отключена")
             return True
-        
-        user_id = message.from_user.id
-        try:
-            chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, user_id)
-            status = chat_member.status
-            is_subscribed = status in [
-                ChatMemberStatus.MEMBER,
-                ChatMemberStatus.ADMINISTRATOR,
-                ChatMemberStatus.CREATOR
-            ]
-            logger.debug(f"👤 Пользователь {user_id}: статус={status}, подписан={is_subscribed}")
-            return is_subscribed
-            
-        except (TelegramBadRequest, TelegramForbiddenError) as e:
-            # Канал недоступен для проверки — отключаем защиту
-            if "member list is inaccessible" in str(e) or "chat not found" in str(e):
-                logger.error(f"❌ Канал {REQUIRED_CHANNEL} недоступен для проверки подписки!")
-                logger.error(f"   Причина: {e}")
-                logger.error(f"   Решение: Добавьте бота @{(await bot.get_me()).username} как администратора канала с правом «Просматривать участников»")
-                CHANNEL_ACCESSIBLE = False
-                return True  # Пропускаем пользователя (защита отключена)
-            return False
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Ошибка проверки подписки: {e}")
-            return False
-
-# ==================== ОБРАБОТЧИКИ ====================
+        return False
+    except Exception:
+        return False
 
 async def send_subscription_required(message: Message):
-    """Отправить сообщение с требованием подписки"""
     await message.answer(
-        f"🔒 <b>Требуется подписка</b>\n\n"
-        f"Чтобы пользоваться ботом, подпишитесь на наш канал:\n"
-        f"<a href='https://t.me/{REQUIRED_CHANNEL.lstrip('@')}'>{REQUIRED_CHANNEL}</a>\n\n"
-        f"После подписки нажмите кнопку ниже для проверки 🔍",
-        reply_markup=get_subscription_keyboard(),
+        f"🔒 <b>Подписка обязательна</b>\n\n"
+        f"Подпишитесь на канал, чтобы пользоваться ботом:\n"
+        f"<a href='https://t.me/{REQUIRED_CHANNEL.lstrip('@')}'>@bot_pro_bot_you</a>\n\n"
+        f"После подписки напишите /start",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📺 Перейти в канал", url="https://t.me/bot_pro_bot_you")],
+            [InlineKeyboardButton(text="🔄 Проверить подписку", callback_data="check_sub")]
+        ]),
         disable_web_page_preview=True
     )
 
+@dp.callback_query(F.data == "check_sub")
+async def check_sub(callback):
+    if await is_subscribed(callback.from_user.id):
+        await start_handler(callback.message)
+        await callback.answer("✅ Доступ открыт!", show_alert=True)
+    else:
+        await callback.answer("❌ Подписка не найдена. Подпишитесь и попробуйте снова.", show_alert=True)
+
+# ==================== КОМАНДЫ ====================
+
 @dp.message(Command("start"))
 async def start_handler(message: Message):
-    db.add_user(
-        user_id=message.from_user.id,
-        username=message.from_user.username,
-        first_name=message.from_user.first_name,
-        last_name=message.from_user.last_name,
-        language_code=message.from_user.language_code
-    )
-    
-    global CHANNEL_ACCESSIBLE
-    
-    # Проверяем подписку только если канал доступен
-    if CHANNEL_ACCESSIBLE:
-        try:
-            chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, message.from_user.id)
-            is_subscribed = chat_member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
-        except (TelegramBadRequest, TelegramForbiddenError) as e:
-            if "member list is inaccessible" in str(e):
-                logger.error(f"❌ Канал недоступен: {e}")
-                CHANNEL_ACCESSIBLE = False
-                is_subscribed = True  # Пропускаем пользователя
-            else:
-                is_subscribed = False
-    else:
-        is_subscribed = True  # Канал недоступен — пропускаем всех
-    
-    if is_subscribed:
-        await message.answer(
-            "🤖 <b>Привет! Я JARVIS</b>\n\n"
-            "Ваш персональный ассистент внутри Telegram.\n\n"
-            "<b>Что я умею:</b>\n"
-            "• 📌 Сохранять сообщения в закладки\n"
-            "• ✅ Напоминать о важных делах\n"
-            "• 📝 Создавать заметки и списки\n\n"
-            "Выберите раздел ниже 👇",
-            reply_markup=get_main_menu()
-        )
-    else:
+    if not await is_subscribed(message.from_user.id):
         await send_subscription_required(message)
-
-@dp.callback_query(lambda c: c.data == "check_subscription")
-async def check_subscription_callback(callback: CallbackQuery):
-    global CHANNEL_ACCESSIBLE
-    
-    if not CHANNEL_ACCESSIBLE:
-        await callback.message.edit_text(
-            "⚠️ <b>Временно недоступно</b>\n\n"
-            "Проверка подписки отключена из-за технических ограничений.\n"
-            "Все функции бота доступны без подписки.",
-            reply_markup=get_main_menu()
-        )
-        await callback.answer("✅ Доступ разрешён")
         return
     
-    try:
-        chat_member = await bot.get_chat_member(REQUIRED_CHANNEL, callback.from_user.id)
-        is_subscribed = chat_member.status in [ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR]
-    except (TelegramBadRequest, TelegramForbiddenError) as e:
-        if "member list is inaccessible" in str(e):
-            CHANNEL_ACCESSIBLE = False
-            await callback.message.edit_text(
-                "⚠️ <b>Ошибка доступа к каналу</b>\n\n"
-                "Администратор временно отключил проверку подписки.\n"
-                "Все функции доступны.",
-                reply_markup=get_main_menu()
-            )
-            await callback.answer("✅ Доступ разрешён")
-            return
-        is_subscribed = False
+    flag, greeting_word = random.choice(GREETINGS)
+    smart_phrase = random.choice(SMART_PHRASES_RU)
+    mood = random.choice(MOOD_EMOJIS)
     
-    if is_subscribed:
-        await callback.message.edit_text(
-            "✅ <b>Подписка подтверждена!</b>\n\n"
-            "Теперь вы можете пользоваться всеми функциями бота.\n"
-            "Выберите раздел ниже 👇",
-            reply_markup=get_main_menu()
-        )
-        await callback.answer("🎉 Добро пожаловать!")
-    else:
-        await callback.answer("❌ Вы не подписаны на канал. Подпишитесь и попробуйте снова.", show_alert=True)
-
-# ... остальные обработчики без изменений (как в предыдущей версии) ...
-
-@dp.message(Command("help"), IsSubscriberFilter())
-async def help_handler(message: Message):
+    hour = datetime.now().hour
+    time_greeting = "Доброе утро" if 5 <= hour < 12 else "Добрый день" if 12 <= hour < 18 else "Добрый вечер"
+    
     await message.answer(
-        "<b>📖 Помощь</b>\n\n"
-        "<b>📌 Закладки</b>\n"
-        "Перешлите любое сообщение мне — я сохраню его.\n"
-        "Или напишите текст — он тоже сохранится.\n\n"
-        "<b>✅ Напоминания</b>\n"
-        "Напишите: <code>напомни завтра в 10 позвонить маме</code>\n\n"
-        "<b>📝 Заметки</b>\n"
-        "Создавайте заметки через меню → «📝 Заметки».\n\n"
-        "Есть вопросы? Пишите!",
-        reply_markup=get_main_menu()
+        f"{mood} <b>{greeting_word}!</b> {flag}\n\n"
+        f"<i>{smart_phrase}</i>\n\n"
+        f"📝 <b>Как пользоваться:</b>\n"
+        f"• Просто напиши заметку — она сохранится\n"
+        f"• Добавь #теги для поиска (#работа #идея)\n"
+        f"• Нажми 🔍 для поиска по тегам",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔍 Поиск по тегам", callback_data="search")],
+            [InlineKeyboardButton(text="ℹ️ Помощь", callback_data="help")]
+        ])
     )
 
-@dp.message(Command("bookmarks"), IsSubscriberFilter())
-async def bookmarks_command(message: Message):
-    bookmarks = db.get_bookmarks(message.from_user.id, limit=20)
-    
-    if not bookmarks:
-        text = "📭 У вас пока нет закладок.\n\nПерешлите любое сообщение мне, чтобы сохранить его!"
-        await message.answer(text, reply_markup=get_back_button("bookmarks_menu"))
-        return
-    
-    text = "📌 <b>Ваши закладки</b>:\n\n"
-    for i, bm in enumerate(bookmarks[:10], 1):
-        content = bm['message_text'][:50] + "..." if bm['message_text'] and len(bm['message_text']) > 50 else bm['message_text']
-        text += f"{i}. {content or '📎 Файл/медиа'}\n"
-    
-    if len(bookmarks) > 10:
-        text += f"\n...и ещё {len(bookmarks) - 10} закладок"
-    
-    await message.answer(text, reply_markup=get_back_button("bookmarks_menu"))
-
-@dp.message(Command("reminders"), IsSubscriberFilter())
-async def reminders_command(message: Message):
-    await show_reminders_simple(message)
-
-@dp.message(Command("notes"), IsSubscriberFilter())
-async def notes_command(message: Message):
-    await show_notes_simple(message)
-
-@dp.message(IsSubscriberFilter())
-async def handle_text(message: Message):
-    if not message.text:
-        await save_bookmark_simple(message, bot)
-        return
-        
-    text_lower = message.text.lower()
-    
-    reminder_triggers = ["напомни", "напомнить", "напомни мне"]
-    if any(trigger in text_lower for trigger in reminder_triggers):
-        from handlers.reminders import add_reminder_start, ReminderStates
-        from aiogram.fsm.context import FSMContext
-        
-        state = FSMContext(storage=dp.storage, chat_id=message.chat.id, user_id=message.from_user.id)
-        
-        class FakeCallback:
-            def __init__(self, msg):
-                self.message = msg
-                self.answer = lambda: None
-        
-        await add_reminder_start(FakeCallback(message), state)
-        await state.set_state(ReminderStates.waiting_for_text)
-        return
-    
-    await save_bookmark_simple(message, bot)
-
-@dp.callback_query(lambda c: c.data == "menu_main", IsSubscriberFilter())
-async def back_to_main(callback: CallbackQuery):
-    try:
-        await callback.message.edit_text(
-            "🤖 <b>JARVIS — Главное меню</b>\n\n"
-            "Выберите раздел:",
-            reply_markup=get_main_menu()
-        )
-    except Exception:
-        await callback.message.answer(
-            "🤖 <b>JARVIS — Главное меню</b>\n\n"
-            "Выберите раздел:",
-            reply_markup=get_main_menu()
-        )
+@dp.callback_query(F.data == "help")
+async def help_handler(callback):
+    await callback.message.edit_text(
+        "💡 <b>Помощь</b>\n\n"
+        "✨ <b>Сохранение заметок:</b>\n"
+        "Просто напиши или перешли сообщение — оно сохранится автоматически.\n\n"
+        "🏷️ <b>Теги:</b>\n"
+        "Используй #теги в тексте:\n"
+        "<code>Купить молоко #список #важное</code>\n"
+        "Теги: <code>список</code>, <code>важное</code>\n\n"
+        "🔍 <b>Поиск:</b>\n"
+        "Нажми «🔍 Поиск» → введи тег без #:\n"
+        "<code>работа</code> → покажет все заметки с #работа",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_start")]
+        ])
+    )
     await callback.answer()
 
-# Регистрация роутеров
-dp.include_router(bookmarks_router)
-dp.include_router(reminders_router)
-dp.include_router(notes_router)
-dp.include_router(settings_router)
+@dp.callback_query(F.data == "back_to_start")
+async def back_to_start(callback):
+    await start_handler(callback.message)
 
-# ==================== ФОНОВАЯ ЗАДАЧА ====================
+@dp.callback_query(F.data == "search")
+async def search_start(callback):
+    await callback.message.edit_text(
+        "🔍 <b>Поиск по тегам</b>\n\n"
+        "Введите тег <b>без символа #</b>:\n"
+        "Например: <code>работа</code> или <code>идея</code>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Отмена", callback_data="back_to_start")]
+        ])
+    )
+    await callback.answer()
 
-async def check_reminders_task():
-    while True:
-        try:
-            due = db.get_due_reminders()
-            for reminder in due:
-                try:
-                    await bot.send_message(
-                        chat_id=reminder['user_id'],
-                        text=f"⏰ <b>Напоминание!</b>\n\n{reminder['text']}"
-                    )
-                    db.mark_reminder_completed(reminder['id'])
-                except Exception as e:
-                    logger.error(f"❌ Ошибка отправки напоминания {reminder['id']}: {e}")
-            await asyncio.sleep(60)
-        except Exception as e:
-            logger.error(f"❌ Ошибка в фоновой задаче: {e}")
-            await asyncio.sleep(60)
+# ==================== СОХРАНЕНИЕ И ПОИСК ====================
+
+user_search_state = {}
+
+@dp.message()
+async def universal_handler(message: Message):
+    user_id = message.from_user.id
+    
+    # Проверка подписки для всех сообщений
+    if not await is_subscribed(user_id):
+        await send_subscription_required(message)
+        return
+    
+    # Режим поиска
+    if user_id in user_search_state and user_search_state[user_id] == "searching":
+        del user_search_state[user_id]
+        
+        tag = message.text.strip().lower().lstrip('#')
+        if not tag:
+            await message.answer(
+                "⚠️ Введите тег без #", 
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔍 Повторить поиск", callback_data="search")]
+                ])
+            )
+            return
+        
+        results = search_notes(user_id, tag)
+        
+        if not results:
+            await message.answer(
+                f"📭 Нет заметок с тегом <code>#{tag}</code>",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔍 Новый поиск", callback_data="search")],
+                    [InlineKeyboardButton(text="⬅️ В меню", callback_data="back_to_start")]
+                ])
+            )
+            return
+        
+        text = f"🔍 Найдено {len(results)} заметок с тегом <code>#{tag}</code>:\n\n"
+        for i, note in enumerate(results[:10], 1):
+            preview = note['content'][:80] + "..." if len(note['content']) > 80 else note['content']
+            text += f"{i}. {preview}\n"
+        
+        await message.answer(
+            text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔍 Новый поиск", callback_data="search")],
+                [InlineKeyboardButton(text="⬅️ В меню", callback_data="back_to_start")]
+            ])
+        )
+        return
+    
+    # Обычное сохранение заметки
+    content = message.text or message.caption or ""
+    if message.photo:
+        content = (message.caption or "") + "\n[🖼️ Фото]"
+    elif message.document:
+        content = (message.caption or "") + f"\n[📄 {message.document.file_name}]"
+    elif message.video:
+        content = (message.caption or "") + "\n[🎬 Видео]"
+    elif message.voice:
+        content = (message.caption or "") + "\n[🎤 Голосовое]"
+    
+    if not content.strip():
+        await message.reply("💭 Пустые сообщения не сохраняю. Напиши что-нибудь интересное!")
+        return
+    
+    tags = extract_tags(content)
+    note_id = add_note(user_id, content, tags)
+    mood = random.choice(["✅", "✨", "💫", "🌟", "🌿"])
+    tag_text = f"\n🏷️ Теги: #{' #'.join(tags.split(','))}" if tags else ""
+    
+    await message.reply(
+        f"{mood} Сохранено! (#{note_id}){tag_text}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔍 Поиск по тегам", callback_data="search")],
+            [InlineKeyboardButton(text="ℹ️ Помощь", callback_data="help")]
+        ])
+    )
 
 # ==================== ЗАПУСК ====================
 
 async def main():
-    logger.info("🚀 Запуск бота JARVIS...")
-    me = await bot.get_me()
-    logger.info(f"🤖 Bot: @{me.username} (id={me.id})")
-    logger.info(f"🔒 Защита подпиской: канал {REQUIRED_CHANNEL}")
+    logger.info("🚀 Запуск JARVIS Lite")
+    logger.info(f"🤖 Бот: @{(await bot.get_me()).username}")
+    logger.info(f"🔒 Обязательная подписка: {REQUIRED_CHANNEL}")
     
-    # Тестовый запрос к каналу для проверки доступа
-    global CHANNEL_ACCESSIBLE
-    try:
-        await bot.get_chat_member(REQUIRED_CHANNEL, me.id)
-        logger.info("✅ Доступ к каналу подтверждён (бот является администратором)")
-    except (TelegramBadRequest, TelegramForbiddenError) as e:
-        if "member list is inaccessible" in str(e):
-            logger.warning("⚠️ Канал недоступен для проверки подписки!")
-            logger.warning(f"   Причина: {e}")
-            logger.warning(f"   Решение: Добавьте бота @{me.username} как администратора канала {REQUIRED_CHANNEL} с правом «Просматривать участники»")
-            CHANNEL_ACCESSIBLE = False
-        else:
-            logger.warning(f"⚠️ Неизвестная ошибка доступа к каналу: {e}")
-    
-    try:
-        stats = db.get_user_stats(123456789)
-        logger.info("✅ Подключение к базе данных установлено")
-    except Exception as e:
-        logger.error(f"❌ Ошибка подключения к БД: {e}")
-        sys.exit(1)
-    
-    asyncio.create_task(check_reminders_task())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("🛑 Бот остановлен пользователем")
+        logger.info("👋 Бот остановлен")
     except Exception as e:
         logger.exception(f"❌ Критическая ошибка: {e}")
-        sys.exit(1)
